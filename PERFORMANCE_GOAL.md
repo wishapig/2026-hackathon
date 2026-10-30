@@ -137,3 +137,5 @@ accept-public20默认附带其他算法功能验证；如实际入口尚未包�
 ## 本轮进展
 
 - 完整基线：96908872cab3e24e22096fbeac95c64a0f78862d（round2/baseline），[证据](results/round2/baseline/manifest.json)。不覆盖历史P007。
+
+- 第一波候选：表达式复用7de702a、计数批发b5e36a5、派发361574c，组合109e361。三轮交错筛选中位数约271.2/277.6/272.1/272.5ms，对照272.8ms；无稳定收益结论，暂不升级推荐。报告在results/round2/screening。继续L缓冲避免重复初始化的独立实验；已拒绝无证据的复杂唤醒改造。
