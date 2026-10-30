@@ -731,6 +731,13 @@ struct BoundExpr {
 struct BoundRegion {
     BoundExpr offset, rows, cols, stride;
 };
+struct FieldUpdate {
+    const BoundExpr *expression = nullptr;
+    std::size_t index = 0;
+    // 0: argument; 1..4: read coordinate; 5..8: write coordinate;
+    // 9/10: validate the completed read/write region in source order.
+    unsigned kind = 0;
+};
 struct BoundNode {
     const Node *source = nullptr;
     std::size_t slot = no_slot;
@@ -739,6 +746,9 @@ struct BoundNode {
     std::vector<BoundRegion> reads, writes;
     std::vector<BoundNode> body, otherwise;
     Task scratch;
+    std::vector<FieldUpdate> changing_fields;
+    std::vector<BoundNode *> scope_calls;
+    bool fields_initialized = false;
 };
 struct BoundProgram {
     std::vector<BoundNode> nodes;
@@ -782,6 +792,58 @@ struct Lowering {
         for (std::size_t i = 0; i < e.args.size(); ++i)
             out.args[i] = expression(e.args[i], symbols);
         return out;
+    }
+    static bool changes_with_loop(const BoundExpr &e, std::size_t first_slot) {
+        if (e.code == Code::Variable && (e.slot == no_slot || e.slot >= first_slot))
+            return true;
+        for (const auto &child : e.args)
+            if (changes_with_loop(child, first_slot)) return true;
+        return false;
+    }
+    void plan_loop_fields(BoundNode &call, BoundNode *loop) {
+        if (!loop || limits.max_steps) return;
+        std::size_t changing = 0, invariant = 0;
+        const auto count = [&](const BoundExpr &e) {
+            if (changes_with_loop(e, loop->slot)) ++changing;
+            else ++invariant;
+        };
+        for (const auto &e : call.args) count(e);
+        for (const auto *regions : {&call.reads, &call.writes})
+            for (const auto &r : *regions)
+                for (const auto *e : {&r.offset, &r.rows, &r.cols, &r.stride}) count(*e);
+        if (!invariant) return;
+        const auto checks = call.reads.size() + call.writes.size();
+        const auto count_updates = std::max(changing + checks, std::size_t(1));
+        const auto scope_capacity = loop->scope_calls.size() == loop->scope_calls.capacity()
+            ? (loop->scope_calls.capacity() ? loop->scope_calls.capacity() * 2 : 1) : 0;
+        // An optional plan must not consume the base lowerer's remaining budget.
+        const auto available = (limits.memory_bytes - result.bytes) / 2;
+        if (scope_capacity > available / sizeof(BoundNode *)) return;
+        if (count_updates > (available - scope_capacity * sizeof(BoundNode *)) /
+                                sizeof(FieldUpdate)) return;
+        resize(call.changing_fields, count_updates);
+        std::size_t at = 0;
+        const auto field = [&](const BoundExpr &e, std::size_t index, unsigned kind) {
+            if (changes_with_loop(e, loop->slot))
+                call.changing_fields[at++] = {&e, index, kind};
+        };
+        for (std::size_t i = 0; i < call.args.size(); ++i) field(call.args[i], i, 0);
+        for (unsigned writing = 0; writing < 2; ++writing) {
+            const auto &regions = writing ? call.writes : call.reads;
+            for (std::size_t i = 0; i < regions.size(); ++i) {
+                const auto &r = regions[i];
+                field(r.offset, i, 1 + writing * 4);
+                field(r.rows, i, 2 + writing * 4);
+                field(r.cols, i, 3 + writing * 4);
+                field(r.stride, i, 4 + writing * 4);
+                call.changing_fields[at++] = {nullptr, i, 9 + writing};
+            }
+        }
+        if (scope_capacity) {
+            take(scope_capacity * sizeof(BoundNode *));
+            loop->scope_calls.reserve(scope_capacity);
+        }
+        loop->scope_calls.push_back(&call);
     }
     std::size_t bind(Symbols &symbols, const std::string &name) {
         if (result.slots == no_slot)
@@ -850,6 +912,15 @@ struct Lowering {
         }
         return output;
     }
+    void plan_scopes(std::vector<BoundNode> &nodes, BoundNode *loop = nullptr) {
+        for (auto &node : nodes) {
+            if (node.source->kind == Node::Kind::For) plan_scopes(node.body, &node);
+            else if (node.source->kind == Node::Kind::If) {
+                plan_scopes(node.body, loop);
+                plan_scopes(node.otherwise, loop);
+            } else if (node.source->kind == Node::Kind::Call) plan_loop_fields(node, loop);
+        }
+    }
     BoundProgram lower(const Program &program) {
         static const std::string n = "n", b = "b";
         take(sizeof(BoundProgram) + 2 * sizeof(Int) + 2 * sizeof(Symbols::value_type));
@@ -858,6 +929,7 @@ struct Lowering {
         for (std::size_t i = 0; i < result.guards.size(); ++i)
             result.guards[i] = expression(program.parameter_guards[i], parameters);
         result.nodes = nodes(program.nodes, parameters);
+        if (!limits.max_steps) plan_scopes(result.nodes);
         return std::move(result);
     }
 };
@@ -933,6 +1005,9 @@ struct Evaluator {
         r.rows = nonneg(e.rows, values);
         r.cols = nonneg(e.cols, values);
         r.stride = nonneg(e.stride, values);
+        check_region(r);
+    }
+    void check_region(const Region &r) {
         if (r.cols > r.stride)
             throw std::runtime_error("region columns exceed stride");
         __int128 end = r.offset;
@@ -940,6 +1015,28 @@ struct Evaluator {
             end += static_cast<__int128>(r.rows - 1) * r.stride + r.cols;
         if (end > elements)
             throw std::runtime_error("memory region out of bounds");
+    }
+    void update_fields(BoundNode &node, const std::vector<Int> &values) {
+        auto &task = node.scratch;
+        for (const auto &field : node.changing_fields) {
+            if (!field.expression) {
+                if (field.kind == 9) check_region(task.reads[field.index]);
+                else if (field.kind == 10) check_region(task.writes[field.index]);
+                continue;
+            }
+            if (field.kind == 0) {
+                task.args[field.index] = eval(*field.expression, values);
+                continue;
+            }
+            auto &region = field.kind <= 4 ? task.reads[field.index] : task.writes[field.index];
+            const auto value = nonneg(*field.expression, values);
+            switch ((field.kind - 1) % 4) {
+            case 0: region.offset = value; break;
+            case 1: region.rows = value; break;
+            case 2: region.cols = value; break;
+            case 3: region.stride = value; break;
+            }
+        }
     }
     void publish(const Task &t) {
         if (count == std::numeric_limits<std::size_t>::max() ||
@@ -965,6 +1062,7 @@ struct Evaluator {
                 Int step = eval(node.step, values);
                 if (step <= 0)
                     throw std::runtime_error("nonpositive loop step");
+                for (auto *call : node.scope_calls) call->fields_initialized = false;
                 for (Int i = first; i < last;) {
                     tick();
                     values[node.slot] = i;
@@ -979,12 +1077,17 @@ struct Evaluator {
             }
             case Node::Kind::Call: {
                 auto &t = node.scratch;
-                for (std::size_t i = 0; i < node.args.size(); ++i)
-                    t.args[i] = eval(node.args[i], values);
-                for (std::size_t i = 0; i < node.reads.size(); ++i)
-                    region(node.reads[i], values, t.reads[i]);
-                for (std::size_t i = 0; i < node.writes.size(); ++i)
-                    region(node.writes[i], values, t.writes[i]);
+                if (node.fields_initialized) {
+                    update_fields(node, values);
+                } else {
+                    for (std::size_t i = 0; i < node.args.size(); ++i)
+                        t.args[i] = eval(node.args[i], values);
+                    for (std::size_t i = 0; i < node.reads.size(); ++i)
+                        region(node.reads[i], values, t.reads[i]);
+                    for (std::size_t i = 0; i < node.writes.size(); ++i)
+                        region(node.writes[i], values, t.writes[i]);
+                    node.fields_initialized = !node.changing_fields.empty();
+                }
                 publish(t);
                 break;
             }
