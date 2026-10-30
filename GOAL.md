@@ -146,6 +146,7 @@ manifest 至少包括：源码 commit、benchmark 工具版本、输入/规格/�
 | ID | 被测完整 commit | 环境/内核 | 构建与运行配置 | M 字节 | T 中位秒 | 验收与最终报告 | 状态/支配者 |
 | --- | --- | --- | --- | ---: | ---: | --- | --- |
 | P001 | c410f80ab80f9e2468edbc030fc864ca3a233a71 | 本地x86-64/demo | Release; auto/atomic/16线程/batch1 | 1839 | 0.449926696 | [证据](results/pareto/P001/manifest.json) | 已验收本地基线；R25默认部署未完成 |
+| P002 | 4416907b582b3c0201e92425dbaf0db046c814fd | 本地x86-64/demo | Release; portable-default auto/atomic/0线程/batch1 | 504 | 0.30625472 | [证据](results/pareto/P002/manifest.json) | 已验收；相对P001改善，支配复测待确认 |
 
 第一条记录应是经过本轮确认的基线；若测量时已被另一合格版本支配，仍在证据中保留其 baseline 身份，但不宣称它属于当前前沿。
 
