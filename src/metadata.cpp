@@ -283,7 +283,79 @@ Json compact_nodes(const Json &j, unsigned depth = 0) {
     }
     return Json{std::move(result)};
 }
-Json compact_document(const std::string &payload, std::size_t maximum) {
+class BinaryParser {
+    const std::string &s;
+    std::size_t p = 0, nodes = 0, maximum;
+    [[noreturn]] void fail() const {
+        throw std::runtime_error("invalid binary metadata at byte " + std::to_string(p));
+    }
+    unsigned char take() {
+        if (p == s.size())
+            fail();
+        return static_cast<unsigned char>(s[p++]);
+    }
+    std::uint64_t argument(unsigned tag) {
+        if (tag < 24)
+            return tag;
+        if (tag > 27)
+            fail();
+        const unsigned bytes = 1u << (tag - 24);
+        std::uint64_t result = 0;
+        for (unsigned i = 0; i < bytes; ++i)
+            result = (result << 8) | take();
+        const auto minimum = bytes == 1 ? std::uint64_t(24) :
+                             std::uint64_t(1) << (bytes * 4);
+        if (result < minimum)
+            fail();
+        return result;
+    }
+    Json value(unsigned depth) {
+        if (depth > 64 || ++nodes > maximum)
+            throw std::runtime_error("binary metadata resource limit");
+        const auto tag = take();
+        const auto kind = tag >> 5;
+        if (kind != 0 && kind != 1 && kind != 3 && kind != 4)
+            fail();
+        const auto n = argument(tag & 31);
+        if (kind <= 1) {
+            if (n > static_cast<std::uint64_t>(std::numeric_limits<Int>::max()))
+                fail();
+            return Json{kind == 0 ? static_cast<Int>(n) : -1 - static_cast<Int>(n)};
+        }
+        if (n > s.size() - p)
+            fail();
+        if (kind == 3) {
+            if (n > 128)
+                fail();
+            std::string text;
+            text.reserve(static_cast<std::size_t>(n));
+            for (std::uint64_t i = 0; i < n; ++i) {
+                const auto c = take();
+                if (c >= 128)
+                    fail();
+                text.push_back(static_cast<char>(c));
+            }
+            return Json{std::move(text)};
+        }
+        if (n > maximum - nodes)
+            throw std::runtime_error("binary metadata array budget exceeded");
+        Json::Array values;
+        values.reserve(static_cast<std::size_t>(n));
+        for (std::uint64_t i = 0; i < n; ++i)
+            values.push_back(value(depth + 1));
+        return Json{std::move(values)};
+    }
+
+  public:
+    BinaryParser(const std::string &bytes, std::size_t cap) : s(bytes), maximum(cap) {}
+    Json parse() {
+        auto result = value(0);
+        if (p != s.size())
+            fail();
+        return result;
+    }
+};
+Json compact_document(const std::string &payload, std::size_t maximum, bool binary = false) {
     if (payload.size() < 64)
         throw std::runtime_error("truncated compact input digests");
     const auto digest = [&](std::size_t offset) {
@@ -298,7 +370,7 @@ Json compact_document(const std::string &payload, std::size_t maximum) {
         return result;
     };
     const auto body = payload.substr(64);
-    const auto parsed = Parser(body, maximum).parse();
+    const auto parsed = binary ? BinaryParser(body, maximum).parse() : Parser(body, maximum).parse();
     const auto &a = compact_array(parsed, 4);
     const auto frontend = a[2].number();
     if (frontend != 0 && frontend != 1)
@@ -811,8 +883,9 @@ Program load_metadata(const std::string &path, const Limits &limits) {
     if (!in)
         throw std::runtime_error("truncated metadata header");
     const std::string magic(reinterpret_cast<char *>(h.data()), 8);
-    const bool compressed = magic == "DAGMETA2" || magic == "DAGMETA4";
-    const bool compact = magic == "DAGMETA3" || magic == "DAGMETA4";
+    const bool binary = magic == "DAGMETA5" || magic == "DAGMETA6";
+    const bool compressed = magic == "DAGMETA2" || magic == "DAGMETA4" || magic == "DAGMETA6";
+    const bool compact = magic == "DAGMETA3" || magic == "DAGMETA4" || binary;
     if (magic != "DAGMETA1" && !compressed && !compact)
         throw std::runtime_error("metadata magic/version mismatch");
     const auto length = little(h.data() + 8);
@@ -863,7 +936,7 @@ Program load_metadata(const std::string &path, const Limits &limits) {
     }
     if (hash != little(h.data() + 16))
         throw std::runtime_error("metadata checksum mismatch");
-    Json root = compact ? compact_document(payload, limits.memory_bytes / 512)
+    Json root = compact ? compact_document(payload, limits.memory_bytes / 512, binary)
                         : Parser(payload, limits.memory_bytes / 256).parse();
     keys(root, {"schema_version", "source_digest", "contract_digest", "operators", "program",
                 "frontend", "parameter_guards"});

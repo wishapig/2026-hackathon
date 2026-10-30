@@ -109,12 +109,15 @@ payload byte length, and little-endian uint64 FNV-1a checksum of the decoded pay
 - `DAGMETA3`: the payload contains two raw 32-byte SHA-256 digests (source, catalog),
   followed by compact positional JSON as described below.
 - `DAGMETA4`: exactly one zlib stream containing the `DAGMETA3` payload.
+- `DAGMETA5`: the two raw input digests followed by the same positional tree in
+  the integer/string/array binary grammar below.
+- `DAGMETA6`: exactly one zlib stream containing the `DAGMETA5` payload.
 
-The compiler defaults to `--encoding auto`, which picks the smallest of the four
+The compiler defaults to `--encoding auto`, which picks the smallest of the six
 containers. `--encoding raw`, `--encoding zlib`, `--encoding compact` and
-`--encoding compact-zlib` select explicit comparison
+`--encoding compact-zlib`, `--encoding binary` and `--encoding binary-zlib` select explicit comparison
 variants. CMake exposes the same choice as `DAG_METADATA_ENCODING`. The runtime
-accepts all four versions and requires zlib >= 1.2.9 (Ubuntu package `zlib1g-dev` for
+accepts all six versions and requires zlib >= 1.2.9 (Ubuntu package `zlib1g-dev` for
 building). Decompression checks the declared output size and memory budget before
 allocation, and rejects truncated data, trailing bytes/streams and mismatched
 lengths. Loading and decompression stay inside the scored computation interval.
@@ -144,7 +147,18 @@ imply schema version 1. The decoder reconstructs the ordinary representation and
 runs the same semantic validation as versions 1/2; positional arrays require
 exact field counts. A more conservative parser budget accounts for this temporary
 reconstruction. The container checksum covers the decoded binary digests and
-positional JSON together.
+positional tree together.
+
+Binary versions 5/6 replace only JSON token spelling, using a strict definite-size
+subset of CBOR-style headers: the top three bits select nonnegative integer (0),
+negative integer `-1-argument` (1), ASCII string (3), or array (4). The low five
+bits store arguments 0..23 directly; 24/25/26/27 select 1/2/4/8-byte big-endian
+arguments. Strings and arrays use the argument as their length. No other tags,
+indefinite lengths or nonminimal argument widths are accepted. Integers must fit
+signed int64; strings are limited to 128 ASCII bytes, matching the identifier
+contract. The decoder enforces byte, node and depth budgets before allocation.
+No atom table, algorithm dictionary or extra program data is built into the
+runtime, and all old-format semantic checks still apply after reconstruction.
 
 JSON has schema_version=1, source_digest, contract_digest, operators (symbol
 strings), and program. Expressions are integer literals, variable-name strings,

@@ -21,6 +21,8 @@ MAGIC = b'DAGMETA1'
 COMPRESSED_MAGIC = b'DAGMETA2'
 COMPACT_MAGIC = b'DAGMETA3'
 COMPACT_COMPRESSED_MAGIC = b'DAGMETA4'
+BINARY_MAGIC = b'DAGMETA5'
+BINARY_COMPRESSED_MAGIC = b'DAGMETA6'
 INT_MIN, INT_MAX = -(1 << 63), (1 << 63) - 1
 SOURCE_INT_MIN, SOURCE_INT_MAX = -(1 << 31), (1 << 31) - 1
 TRUSTED_INCLUDES = {'"kernels.h"', '<algorithm>', '<cmath>', '<cstddef>', '<stdexcept>', '<vector>'}
@@ -594,7 +596,32 @@ def compile_source(source: str, catalog_bytes: bytes, entry='block_cholesky'):
     }
 
 
-def compact_payload(document):
+def binary_value(value):
+    """Encode only schema values: signed int64, ASCII names and arrays."""
+    def header(kind, argument):
+        if argument < 24:
+            return bytes([(kind << 5) | argument])
+        width = 1 if argument < 256 else 2 if argument < 65536 else 4 if argument < (1 << 32) else 8
+        return bytes([(kind << 5) | {1: 24, 2: 25, 4: 26, 8: 27}[width]]) + argument.to_bytes(width, 'big')
+
+    if type(value) is int:
+        if not INT_MIN <= value <= INT_MAX:
+            raise CompileError('binary metadata integer outside signed 64-bit range')
+        return header(0, value) if value >= 0 else header(1, -1 - value)
+    if isinstance(value, str):
+        try:
+            data = value.encode('ascii')
+        except UnicodeEncodeError as error:
+            raise CompileError('binary metadata names must be ASCII') from error
+        if len(data) > 128:
+            raise CompileError('binary metadata name exceeds identifier limit')
+        return header(3, len(data)) + data
+    if isinstance(value, list):
+        return header(4, len(value)) + b''.join(binary_value(item) for item in value)
+    raise CompileError('binary metadata only supports integers, strings and arrays')
+
+
+def compact_payload(document, binary=False):
     """Losslessly encode schema field positions; expressions remain unchanged."""
     allowed = {'schema_version', 'source_digest', 'contract_digest', 'operators',
                'program', 'parameter_guards', 'frontend'}
@@ -648,11 +675,13 @@ def compact_payload(document):
         digests.extend(bytes.fromhex(value))
     packed = [document['operators'], document.get('parameter_guards', []),
               int(frontend is not None), nodes(document['program'])]
-    return bytes(digests) + json.dumps(packed, ensure_ascii=True, separators=(',', ':')).encode()
+    body = binary_value(packed) if binary else json.dumps(
+        packed, ensure_ascii=True, separators=(',', ':')).encode()
+    return bytes(digests) + body
 
 
 def encode_metadata(document, encoding='auto'):
-    if encoding not in ('auto', 'raw', 'zlib', 'compact', 'compact-zlib'):
+    if encoding not in ('auto', 'raw', 'zlib', 'compact', 'compact-zlib', 'binary', 'binary-zlib'):
         raise CompileError(f'unknown metadata encoding: {encoding}')
     candidates = []
 
@@ -672,6 +701,12 @@ def encode_metadata(document, encoding='auto'):
             append(COMPACT_MAGIC, payload, False)
         if encoding != 'compact':
             append(COMPACT_COMPRESSED_MAGIC, payload, True)
+    if encoding in ('auto', 'binary', 'binary-zlib'):
+        payload = compact_payload(document, binary=True)
+        if encoding != 'binary-zlib':
+            append(BINARY_MAGIC, payload, False)
+        if encoding != 'binary':
+            append(BINARY_COMPRESSED_MAGIC, payload, True)
     return min(candidates, key=len)
 
 
@@ -682,7 +717,8 @@ def main(argv=None):
     parser.add_argument('-o', '--output', required=True, type=Path)
     parser.add_argument('--entry', default='block_cholesky')
     parser.add_argument('--json-debug', type=Path)
-    parser.add_argument('--encoding', choices=('auto', 'raw', 'zlib', 'compact', 'compact-zlib'),
+    parser.add_argument('--encoding', choices=('auto', 'raw', 'zlib', 'compact', 'compact-zlib',
+                                               'binary', 'binary-zlib'),
                         default='auto', help='metadata container; auto chooses the smallest representation')
     opts = parser.parse_args(argv)
     try:
