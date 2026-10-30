@@ -1,0 +1,25 @@
+{
+  "p010_commit": "b80e04d5e68ba5b8427955d55d4fd5b1ec1589e0",
+  "candidate_commit": "4f233c9595060a84f29a4bd203c53f7ee111834b",
+  "metadata_bytes": 139,
+  "seconds": {
+    "p010": [
+      0.40744886400000013,
+      0.38359321199999996,
+      0.398927123,
+      0.40882911599999994
+    ],
+    "alignment": [
+      0.38601507700000004,
+      0.385427825,
+      0.38829880299999997,
+      0.442502988
+    ]
+  },
+  "median_seconds": {
+    "p010": 0.40318799350000006,
+    "alignment": 0.38715694
+  },
+  "decision": "Median favorable but only2/4 paired wins and one long tail; retain all measurements, require confirmation, no accepted Pareto designation yet.",
+  "coverage": "20/20, no resource exclusions; local demo only"
+}
