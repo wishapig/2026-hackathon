@@ -152,3 +152,5 @@
 - P010保存：b80e04d5e68ba5b8427955d55d4fd5b1ec1589e0，139B，完整公开+R27通过，1warmup+5测量中位327.759ms，同场baseline349.058ms、未加bulk组合342.698ms；full对组合5/5更快。全部样本保留、零资源排除，主机漂移明确记录，不与早先约278ms混比。证据见results/pareto/P010及results/overnight/bulk-confirmation。
 
 - 提交复核未见新代码阻断；最终选版后仍需root默认build对应、一次污染环境submit端到端和14MiB/2线程四case组合资源回收检查，不重复已覆盖语义套件。正式目标环境缺失保持未验证。当前alignment-only候选基于实测L%cacheline=16在独立分支验证。
+
+- 通用局部WAW冗余边剪枝经源码/访问语义分析对当前分块图节省0边，拒绝实现；公式仅离线解释、不写runtime。alignment-only候选4f233c9595060a84f29a4bd203c53f7ee111834b正式公开+R27通过，基于真实L基址偏移证据，当前开始对P010独占筛选。
