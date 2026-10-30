@@ -80,7 +80,6 @@ struct RuntimeOptions {
     bool pin = true;
     bool audit = false;
     std::size_t memory_bytes = 512ull * 1024 * 1024;
-    bool output_locality = false; // soft ready-queue placement by written region
 };
 struct ExecutionStats {
     std::uint64_t tasks = 0, edges = 0, steals = 0;
