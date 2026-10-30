@@ -739,8 +739,6 @@ struct BoundNode {
     std::vector<BoundRegion> reads, writes;
     std::vector<BoundNode> body, otherwise;
     Task scratch;
-    std::vector<std::size_t> call_reuse;
-    std::vector<Int> call_values;
 };
 struct BoundProgram {
     std::vector<BoundNode> nodes;
@@ -784,50 +782,6 @@ struct Lowering {
         for (std::size_t i = 0; i < e.args.size(); ++i)
             out.args[i] = expression(e.args[i], symbols);
         return out;
-    }
-    static bool same_expression(const BoundExpr &a, const BoundExpr &b) {
-        if (a.code != b.code || a.args.size() != b.args.size()) return false;
-        if (a.code == Code::Literal && a.source->value != b.source->value) return false;
-        if (a.code == Code::Variable &&
-            (a.slot != b.slot || (a.slot == no_slot && a.source->name != b.source->name)))
-            return false;
-        if (a.code == Code::Invalid && a.source->op != b.source->op) return false;
-        for (std::size_t i = 0; i < a.args.size(); ++i)
-            if (!same_expression(a.args[i], b.args[i])) return false;
-        return true;
-    }
-    void reuse_call_expressions(BoundNode &node) {
-        // Values cannot change during one call's argument/region assembly.
-        // Reuse earlier identical fields in that same evaluation order only.
-        // An explicit step budget uses the unmodified interpreter path below.
-        if (limits.max_steps) return;
-        // This optional small-field plan must not turn a large variadic/scalar
-        // call into a quadratic analysis or reject an otherwise valid program.
-        constexpr std::size_t max_fields = 128;
-        if (node.args.size() > max_fields ||
-            node.reads.size() > (max_fields - node.args.size()) / 4 ||
-            node.writes.size() > (max_fields - node.args.size()) / 4 - node.reads.size())
-            return;
-        const auto count = node.args.size() + 4 * (node.reads.size() + node.writes.size());
-        const auto extra = 2 * count * (sizeof(const BoundExpr *) + sizeof(std::size_t) + sizeof(Int));
-        if (extra > limits.memory_bytes - result.bytes) return;
-        std::vector<const BoundExpr *> fields;
-        resize(fields, count);
-        std::size_t at = 0;
-        for (const auto &e : node.args) fields[at++] = &e;
-        for (const auto *rs : {&node.reads, &node.writes})
-            for (const auto &r : *rs)
-                for (const auto *e : {&r.offset, &r.rows, &r.cols, &r.stride}) fields[at++] = e;
-        resize(node.call_reuse, count);
-        resize(node.call_values, count);
-        for (std::size_t i = 0; i < count; ++i) {
-            node.call_reuse[i] = i;
-            for (std::size_t j = 0; j < i; ++j)
-                if (node.call_reuse[j] == j && same_expression(*fields[i], *fields[j])) {
-                    node.call_reuse[i] = j;
-                    break;
-                }
-        }
     }
     std::size_t bind(Symbols &symbols, const std::string &name) {
         if (result.slots == no_slot)
@@ -888,7 +842,6 @@ struct Lowering {
                         take(scratch[j].buffer.capacity() + 1);
                     }
                 }
-                reuse_call_expressions(o);
                 break;
             case Node::Kind::Copy:
             case Node::Kind::ZeroUpper:
@@ -988,33 +941,6 @@ struct Evaluator {
         if (end > elements)
             throw std::runtime_error("memory region out of bounds");
     }
-    Int call_field(BoundNode &node, const BoundExpr &e, const std::vector<Int> &values,
-                   std::size_t &field) {
-        const auto current = field++;
-        const auto previous = node.call_reuse[current];
-        if (current == previous)
-            node.call_values[current] = eval(e, values);
-        return node.call_values[previous];
-    }
-    void call_region(BoundNode &node, const BoundRegion &e, const std::vector<Int> &values,
-                     Region &r, std::size_t &field) {
-        const auto nonnegative = [&](const BoundExpr &x) {
-            const Int value = call_field(node, x, values, field);
-            if (value < 0) throw std::runtime_error("negative memory region");
-            return static_cast<std::size_t>(value);
-        };
-        r.offset = nonnegative(e.offset);
-        r.rows = nonnegative(e.rows);
-        r.cols = nonnegative(e.cols);
-        r.stride = nonnegative(e.stride);
-        if (r.cols > r.stride)
-            throw std::runtime_error("region columns exceed stride");
-        __int128 end = r.offset;
-        if (r.rows && r.cols)
-            end += static_cast<__int128>(r.rows - 1) * r.stride + r.cols;
-        if (end > elements)
-            throw std::runtime_error("memory region out of bounds");
-    }
     void publish(const Task &t) {
         if (count == std::numeric_limits<std::size_t>::max() ||
             (limits.max_tasks && count >= limits.max_tasks))
@@ -1053,22 +979,12 @@ struct Evaluator {
             }
             case Node::Kind::Call: {
                 auto &t = node.scratch;
-                if (node.call_reuse.empty()) {
-                    for (std::size_t i = 0; i < node.args.size(); ++i)
-                        t.args[i] = eval(node.args[i], values);
-                    for (std::size_t i = 0; i < node.reads.size(); ++i)
-                        region(node.reads[i], values, t.reads[i]);
-                    for (std::size_t i = 0; i < node.writes.size(); ++i)
-                        region(node.writes[i], values, t.writes[i]);
-                } else {
-                    std::size_t field = 0;
-                    for (std::size_t i = 0; i < node.args.size(); ++i)
-                        t.args[i] = call_field(node, node.args[i], values, field);
-                    for (std::size_t i = 0; i < node.reads.size(); ++i)
-                        call_region(node, node.reads[i], values, t.reads[i], field);
-                    for (std::size_t i = 0; i < node.writes.size(); ++i)
-                        call_region(node, node.writes[i], values, t.writes[i], field);
-                }
+                for (std::size_t i = 0; i < node.args.size(); ++i)
+                    t.args[i] = eval(node.args[i], values);
+                for (std::size_t i = 0; i < node.reads.size(); ++i)
+                    region(node.reads[i], values, t.reads[i]);
+                for (std::size_t i = 0; i < node.writes.size(); ++i)
+                    region(node.writes[i], values, t.writes[i]);
                 publish(t);
                 break;
             }
