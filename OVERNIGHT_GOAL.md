@@ -158,3 +158,5 @@
 - alignment确认：1warmup+5轮，P010374.348ms、alignment381.536ms，仅2/5配对获胜；拒绝合入，不反复测到有利。139B相同；全部20/20零资源排除，14MiB资源交互亦正确。原候选commit和完整证据保留于results/overnight/alignment-confirmation。推荐仍P010，继续仅证据驱动的任务拷贝成本分析。
 
 - P010部署与组合资源收口：污染父环境DAG_THREADS=16、总/图1MiB、MAX*=1、audit/owner/serial等均被现submit清理，默认自动资源输出两校验器20/20；14MiB/2workers四case全部并行且独立4I→2I正确，小96细图触发缓存回收而非伪资源降级。证据results/pareto/P010/deployment及resource-check.json。rootbuild最终对应和清理尚待最终冻结。
+
+- 紧凑Task/string_view方案停止：保留现有Task独立所有权需跨API重构，不能将全批6.3ms复制成本当作仅字符串可省收益。最后限时小候选只复用grid第一遍几何检查已算出的商余/坐标，约15行、无新增缓存；避免第二遍ID数组约1.5MiB成本。候选后准备提前充分收口，不为等06:00空转。
