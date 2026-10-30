@@ -31,5 +31,7 @@
     "offline smaller raw-deflate selection",
     "timed bulk initialization using existing worker pool"
   ],
-  "scope": "local x86-64 demo; official library/Kunpeng unavailable"
+  "scope": "local x86-64 demo; official library/Kunpeng unavailable",
+  "deployment_check": "deployment/result.json",
+  "resource_interaction_check": "resource-check.json"
 }

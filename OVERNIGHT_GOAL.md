@@ -156,3 +156,5 @@
 - 通用局部WAW冗余边剪枝经源码/访问语义分析对当前分块图节省0边，拒绝实现；公式仅离线解释、不写runtime。alignment-only候选4f233c9595060a84f29a4bd203c53f7ee111834b正式公开+R27通过，基于真实L基址偏移证据，当前开始对P010独占筛选。
 
 - alignment确认：1warmup+5轮，P010374.348ms、alignment381.536ms，仅2/5配对获胜；拒绝合入，不反复测到有利。139B相同；全部20/20零资源排除，14MiB资源交互亦正确。原候选commit和完整证据保留于results/overnight/alignment-confirmation。推荐仍P010，继续仅证据驱动的任务拷贝成本分析。
+
+- P010部署与组合资源收口：污染父环境DAG_THREADS=16、总/图1MiB、MAX*=1、audit/owner/serial等均被现submit清理，默认自动资源输出两校验器20/20；14MiB/2workers四case全部并行且独立4I→2I正确，小96细图触发缓存回收而非伪资源降级。证据results/pareto/P010/deployment及resource-check.json。rootbuild最终对应和清理尚待最终冻结。
