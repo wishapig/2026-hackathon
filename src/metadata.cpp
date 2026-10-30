@@ -479,24 +479,171 @@ Int narrow(__int128 x) {
         throw std::runtime_error("integer expression overflow");
     return static_cast<Int>(x);
 }
-// Bindings are a small lexical scope. Flat storage avoids a tree allocation
-// for every variable in every iteration, without changing shadowing semantics.
-struct Env {
-    std::vector<std::pair<std::string, Int>> values;
-    Env() = default;
-    Env(std::initializer_list<std::pair<std::string, Int>> init) : values(init) {}
-    auto find(const std::string &name) const {
-        return std::find_if(values.begin(), values.end(), [&](const auto &v) {
-            return v.first == name;
-        });
+// Lower once per enumeration, then use integer opcodes and lexical slots in
+// the hot loop. The public Program stays immutable and remains the source of
+// diagnostics. In particular this does not cache annotations in mutable Exprs.
+enum class Code {
+    Invalid, Literal, Variable, Neg, Not, Add, Sub, Mul, Div, Mod,
+    Less, LessEqual, Greater, GreaterEqual, Equal, NotEqual, And, Or
+};
+Code opcode(const std::string &op) {
+    if (op == "literal") return Code::Literal;
+    if (op == "variable") return Code::Variable;
+    if (op == "neg") return Code::Neg;
+    if (op == "!") return Code::Not;
+    if (op == "+") return Code::Add;
+    if (op == "-") return Code::Sub;
+    if (op == "*") return Code::Mul;
+    if (op == "/") return Code::Div;
+    if (op == "%") return Code::Mod;
+    if (op == "<") return Code::Less;
+    if (op == "<=") return Code::LessEqual;
+    if (op == ">") return Code::Greater;
+    if (op == ">=") return Code::GreaterEqual;
+    if (op == "==") return Code::Equal;
+    if (op == "!=") return Code::NotEqual;
+    if (op == "&&") return Code::And;
+    if (op == "||") return Code::Or;
+    return Code::Invalid;
+}
+constexpr std::size_t no_slot = std::numeric_limits<std::size_t>::max();
+struct BoundExpr {
+    const Expr *source = nullptr;
+    Code code = Code::Invalid;
+    std::size_t slot = no_slot;
+    std::vector<BoundExpr> args;
+};
+struct BoundRegion {
+    BoundExpr offset, rows, cols, stride;
+};
+struct BoundNode {
+    const Node *source = nullptr;
+    std::size_t slot = no_slot;
+    BoundExpr value, start, stop, step, condition;
+    std::vector<BoundExpr> args;
+    std::vector<BoundRegion> reads, writes;
+    std::vector<BoundNode> body, otherwise;
+    Task scratch;
+};
+struct BoundProgram {
+    std::vector<BoundNode> nodes;
+    std::vector<BoundExpr> guards;
+    std::size_t slots = 2, bytes = 0;
+};
+struct Lowering {
+    // Symbol strings refer to the unchanged source tree, so copying a lexical
+    // scope during this one-time traversal never copies/allocates variable names.
+    using Symbols = std::vector<std::pair<const std::string *, std::size_t>>;
+    const Limits &limits;
+    BoundProgram result;
+    void take(std::size_t bytes) {
+        // Double-charge retained storage as an allocator and temporary-scope
+        // allowance, consistently with decoded Metadata's conservative budget.
+        if (bytes > limits.memory_bytes / 2 ||
+            result.bytes > limits.memory_bytes - bytes * 2)
+            throw ResourceLimit("bound program storage exceeds memory budget");
+        result.bytes += bytes * 2;
     }
-    auto end() const { return values.end(); }
-    Int &operator[](const std::string &name) {
-        for (auto &v : values)
-            if (v.first == name)
-                return v.second;
-        values.emplace_back(name, 0);
-        return values.back().second;
+    template<class T> void resize(std::vector<T> &v, std::size_t n) {
+        if (n > limits.memory_bytes / sizeof(T))
+            throw ResourceLimit("bound program array exceeds memory budget");
+        take(n * sizeof(T));
+        v.resize(n);
+    }
+    BoundExpr expression(const Expr &e, const Symbols &symbols) {
+        BoundExpr out;
+        out.source = &e;
+        out.code = opcode(e.op);
+        if (out.code == Code::Variable) {
+            for (auto it = symbols.rbegin(); it != symbols.rend(); ++it)
+                if (*it->first == e.name) {
+                    out.slot = it->second;
+                    break;
+                }
+            // An unbound variable inside an unexecuted branch/short-circuit
+            // expression remains harmless, as with the source interpreter.
+        }
+        resize(out.args, e.args.size());
+        for (std::size_t i = 0; i < e.args.size(); ++i)
+            out.args[i] = expression(e.args[i], symbols);
+        return out;
+    }
+    std::size_t bind(Symbols &symbols, const std::string &name) {
+        if (result.slots == no_slot)
+            throw std::runtime_error("bound variable slot overflow");
+        take(sizeof(Int) + sizeof(Symbols::value_type));
+        const auto slot = result.slots++;
+        symbols.emplace_back(&name, slot);
+        return slot;
+    }
+    std::vector<BoundNode> nodes(const std::vector<Node> &source, Symbols symbols) {
+        take(symbols.size() * sizeof(Symbols::value_type));
+        std::vector<BoundNode> output;
+        resize(output, source.size());
+        for (std::size_t i = 0; i < source.size(); ++i) {
+            const auto &n = source[i];
+            auto &o = output[i];
+            o.source = &n;
+            switch (n.kind) {
+            case Node::Kind::Let:
+                o.value = expression(n.value, symbols);
+                o.slot = bind(symbols, n.name);
+                break;
+            case Node::Kind::For: {
+                o.start = expression(n.start, symbols);
+                o.stop = expression(n.stop, symbols);
+                o.step = expression(n.step, symbols);
+                Symbols local = symbols;
+                o.slot = bind(local, n.name);
+                o.body = nodes(n.body, std::move(local));
+                break;
+            }
+            case Node::Kind::If:
+                o.condition = expression(n.condition, symbols);
+                o.body = nodes(n.body, symbols);
+                o.otherwise = nodes(n.otherwise, symbols);
+                break;
+            case Node::Kind::Call:
+                resize(o.args, n.args.size());
+                for (std::size_t j = 0; j < n.args.size(); ++j)
+                    o.args[j] = expression(n.args[j], symbols);
+                o.scratch.symbol = n.symbol;
+                take(o.scratch.symbol.capacity() + 1);
+                resize(o.scratch.args, n.args.size());
+                for (bool writing : {false, true}) {
+                    const auto &source_regions = writing ? n.writes : n.reads;
+                    auto &regions = writing ? o.writes : o.reads;
+                    auto &scratch = writing ? o.scratch.writes : o.scratch.reads;
+                    resize(regions, source_regions.size());
+                    resize(scratch, source_regions.size());
+                    for (std::size_t j = 0; j < source_regions.size(); ++j) {
+                        const auto &r = source_regions[j];
+                        auto &region = regions[j];
+                        region.offset = expression(r.offset, symbols);
+                        region.rows = expression(r.rows, symbols);
+                        region.cols = expression(r.cols, symbols);
+                        region.stride = expression(r.stride, symbols);
+                        scratch[j].buffer = r.buffer;
+                        take(scratch[j].buffer.capacity() + 1);
+                    }
+                }
+                break;
+            case Node::Kind::Copy:
+            case Node::Kind::ZeroUpper:
+                break;
+            }
+        }
+        return output;
+    }
+    BoundProgram lower(const Program &program) {
+        static const std::string n = "n", b = "b";
+        take(sizeof(BoundProgram) + 2 * sizeof(Int) + 2 * sizeof(Symbols::value_type));
+        Symbols parameters{{&n, 0}, {&b, 1}};
+        resize(result.guards, program.parameter_guards.size());
+        for (std::size_t i = 0; i < result.guards.size(); ++i)
+            result.guards[i] = expression(program.parameter_guards[i], parameters);
+        result.nodes = nodes(program.nodes, parameters);
+        return std::move(result);
     }
 };
 struct Evaluator {
@@ -505,7 +652,6 @@ struct Evaluator {
     const std::function<void(const Task &)> &emit;
     std::size_t steps = 0, count = 0, elements;
     bool source_int32 = false;
-    std::map<const Node *, Task> call_scratch{};
     Int checked(__int128 value) {
         Int result = narrow(value);
         if (source_int32 && (result < std::numeric_limits<std::int32_t>::min() ||
@@ -519,68 +665,59 @@ struct Evaluator {
             throw std::runtime_error("program work budget exceeded");
         ++steps;
     }
-    Int eval(const Expr &e, const Env &env) {
+    Int eval(const BoundExpr &e, const std::vector<Int> &values) {
         tick();
-        if (e.op == "literal")
-            return checked(e.value);
-        if (e.op == "variable") {
-            auto i = env.find(e.name);
-            if (i == env.end())
-                throw std::runtime_error("unbound variable: " + e.name);
-            return i->second;
+        if (e.code == Code::Literal)
+            return checked(e.source->value);
+        if (e.code == Code::Variable) {
+            if (e.slot == no_slot)
+                throw std::runtime_error("unbound variable: " + e.source->name);
+            return values[e.slot];
         }
-        Int a = eval(e.args.at(0), env);
-        if (e.op == "neg")
+        Int a = eval(e.args.at(0), values);
+        if (e.code == Code::Neg)
             return checked(-static_cast<__int128>(a));
-        if (e.op == "!")
+        if (e.code == Code::Not)
             return !a;
-        if (e.op == "&&" && !a)
+        if (e.code == Code::And && !a)
             return 0;
-        if (e.op == "||" && a)
+        if (e.code == Code::Or && a)
             return 1;
-        Int b = eval(e.args.at(1), env);
-        if (e.op == "+")
-            return checked(static_cast<__int128>(a) + b);
-        if (e.op == "-")
-            return checked(static_cast<__int128>(a) - b);
-        if (e.op == "*")
-            return checked(static_cast<__int128>(a) * b);
-        if (e.op == "/" || e.op == "%") {
+        Int b = eval(e.args.at(1), values);
+        switch (e.code) {
+        case Code::Add: return checked(static_cast<__int128>(a) + b);
+        case Code::Sub: return checked(static_cast<__int128>(a) - b);
+        case Code::Mul: return checked(static_cast<__int128>(a) * b);
+        case Code::Div:
+        case Code::Mod:
             if (b == 0)
                 throw std::runtime_error("division by zero");
             if ((a == std::numeric_limits<Int>::min() ||
-                 (source_int32 && a == std::numeric_limits<std::int32_t>::min())) &&
-                b == -1)
+                 (source_int32 && a == std::numeric_limits<std::int32_t>::min())) && b == -1)
                 throw std::runtime_error("integer division overflow");
-            return checked(e.op == "/" ? a / b : a % b);
+            return checked(e.code == Code::Div ? a / b : a % b);
+        case Code::Less: return a < b;
+        case Code::LessEqual: return a <= b;
+        case Code::Greater: return a > b;
+        case Code::GreaterEqual: return a >= b;
+        case Code::Equal: return a == b;
+        case Code::NotEqual: return a != b;
+        case Code::And: return a && b;
+        case Code::Or: return a || b;
+        default: throw std::runtime_error("invalid evaluated operator");
         }
-        if (e.op == "<")
-            return a < b;
-        if (e.op == "<=")
-            return a <= b;
-        if (e.op == ">")
-            return a > b;
-        if (e.op == ">=")
-            return a >= b;
-        if (e.op == "==")
-            return a == b;
-        if (e.op == "!=")
-            return a != b;
-        if (e.op == "&&")
-            return a && b;
-        if (e.op == "||")
-            return a || b;
-        throw std::runtime_error("invalid evaluated operator");
     }
-    std::size_t nonneg(const Expr &e, const Env &env) {
-        Int x = eval(e, env);
+    std::size_t nonneg(const BoundExpr &e, const std::vector<Int> &values) {
+        Int x = eval(e, values);
         if (x < 0)
             throw std::runtime_error("negative memory region");
         return static_cast<std::size_t>(x);
     }
-    Region region(const RegionExpr &e, const Env &env) {
-        Region r{e.buffer, nonneg(e.offset, env), nonneg(e.rows, env), nonneg(e.cols, env),
-                 nonneg(e.stride, env)};
+    void region(const BoundRegion &e, const std::vector<Int> &values, Region &r) {
+        r.offset = nonneg(e.offset, values);
+        r.rows = nonneg(e.rows, values);
+        r.cols = nonneg(e.cols, values);
+        r.stride = nonneg(e.stride, values);
         if (r.cols > r.stride)
             throw std::runtime_error("region columns exceed stride");
         __int128 end = r.offset;
@@ -588,7 +725,6 @@ struct Evaluator {
             end += static_cast<__int128>(r.rows - 1) * r.stride + r.cols;
         if (end > elements)
             throw std::runtime_error("memory region out of bounds");
-        return r;
     }
     void publish(const Task &t) {
         if (count == std::numeric_limits<std::size_t>::max() ||
@@ -597,45 +733,38 @@ struct Evaluator {
         ++count;
         emit(t);
     }
-    void run(const std::vector<Node> &nodes, Env &env) {
+    void run(std::vector<BoundNode> &nodes, std::vector<Int> &values) {
         for (auto &node : nodes) {
             tick();
-            switch (node.kind) {
+            switch (node.source->kind) {
             case Node::Kind::Let:
-                env[node.name] = checked(eval(node.value, env));
+                values[node.slot] = checked(eval(node.value, values));
                 break;
             case Node::Kind::For: {
-                Int first = checked(eval(node.start, env)), last = eval(node.stop, env),
-                    step = eval(node.step, env);
+                Int first = checked(eval(node.start, values)), last = eval(node.stop, values),
+                    step = eval(node.step, values);
                 if (step <= 0)
                     throw std::runtime_error("nonpositive loop step");
-                Env local;
                 for (Int i = first; i < last;) {
                     tick();
-                    local = env;
-                    local[node.name] = i;
-                    run(node.body, local);
+                    values[node.slot] = i;
+                    run(node.body, values);
                     i = checked(static_cast<__int128>(i) + step);
                 }
                 break;
             }
             case Node::Kind::If: {
-                Env local = env;
-                run(eval(node.condition, env) ? node.body : node.otherwise, local);
+                run(eval(node.condition, values) ? node.body : node.otherwise, values);
                 break;
             }
             case Node::Kind::Call: {
-                auto &t = call_scratch[&node];
-                t.symbol = node.symbol;
-                t.args.resize(node.args.size());
-                t.reads.resize(node.reads.size());
-                t.writes.resize(node.writes.size());
+                auto &t = node.scratch;
                 for (std::size_t i = 0; i < node.args.size(); ++i)
-                    t.args[i] = eval(node.args[i], env);
+                    t.args[i] = eval(node.args[i], values);
                 for (std::size_t i = 0; i < node.reads.size(); ++i)
-                    t.reads[i] = region(node.reads[i], env);
+                    region(node.reads[i], values, t.reads[i]);
                 for (std::size_t i = 0; i < node.writes.size(); ++i)
-                    t.writes[i] = region(node.writes[i], env);
+                    region(node.writes[i], values, t.writes[i]);
                 publish(t);
                 break;
             }
@@ -765,34 +894,53 @@ Program load_metadata(const std::string &path, const Limits &limits) {
         throw ResourceLimit("decoded metadata exceeds memory budget");
     return result;
 }
-void enumerate_program(const Program &program, Parameters p, const Limits &limits,
-                       const std::function<void(const Task &)> &emit) {
+namespace {
+std::size_t parameter_elements(const Program &program, Parameters p) {
     if (p.n <= 0 || p.b <= 0 || p.b > p.n || p.n % p.b)
         throw std::runtime_error("require n>0, 0<b<=n, n%b==0");
-    auto elements = static_cast<__int128>(p.n) * p.n;
+    const auto elements = static_cast<__int128>(p.n) * p.n;
     if (elements > std::numeric_limits<Int>::max() ||
         elements > std::numeric_limits<std::size_t>::max() / sizeof(double))
         throw std::runtime_error("matrix extent overflow");
     if (program.source_int32 && (p.n > std::numeric_limits<std::int32_t>::max() ||
                                  p.b > std::numeric_limits<std::int32_t>::max()))
         throw std::runtime_error("source int parameter overflow");
-    Env env{{"n", p.n}, {"b", p.b}};
-    Evaluator e{p, limits, emit, 0, 0, static_cast<std::size_t>(elements), program.source_int32};
-    for (const auto &guard : program.parameter_guards)
-        if (!e.eval(guard, env))
+    return static_cast<std::size_t>(elements);
+}
+void execute_bound(const Program &program, BoundProgram &bound, Parameters p,
+                   std::size_t elements, const Limits &limits,
+                   const std::function<void(const Task &)> &emit) {
+    Limits remaining = limits;
+    remaining.memory_bytes -= bound.bytes;
+    std::vector<Int> values(bound.slots, 0);
+    values[0] = p.n;
+    values[1] = p.b;
+    Evaluator e{p, remaining, emit, 0, 0, elements, program.source_int32};
+    for (const auto &guard : bound.guards)
+        if (!e.eval(guard, values))
             throw std::runtime_error("source parameter guard rejected input");
-    e.run(program.nodes, env);
+    e.run(bound.nodes, values);
+}
+} // namespace
+void enumerate_program(const Program &program, Parameters p, const Limits &limits,
+                       const std::function<void(const Task &)> &emit) {
+    const auto elements = parameter_elements(program, p);
+    auto bound = Lowering{limits, {}}.lower(program);
+    execute_bound(program, bound, p, elements, limits, emit);
 }
 std::vector<Task> instantiate(const Program &program, Parameters p, const Limits &limits) {
+    const auto elements = parameter_elements(program, p);
+    auto bound = Lowering{limits, {}}.lower(program);
+    const auto available = limits.memory_bytes - bound.bytes;
     std::vector<Task> tasks;
     std::size_t bytes = 0;
-    enumerate_program(program, p, limits, [&](const Task &t) {
+    execute_bound(program, bound, p, elements, limits, [&](const Task &t) {
         std::size_t cost = sizeof(Task) + t.symbol.size() + 1 + t.args.size() * sizeof(Int);
         for (auto &r : t.reads)
             cost += sizeof(Region) + r.buffer.size() + 1;
         for (auto &r : t.writes)
             cost += sizeof(Region) + r.buffer.size() + 1;
-        if (cost > limits.memory_bytes / 2 || bytes > limits.memory_bytes / 2 - cost)
+        if (cost > available / 2 || bytes > available / 2 - cost)
             throw ResourceLimit("task storage exceeds memory budget");
         bytes += cost;
         tasks.push_back(t);
