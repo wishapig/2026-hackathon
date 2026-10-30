@@ -803,7 +803,13 @@ int main(int argc, char **argv) {
                         st.effective_graph_budget_bytes = preparation_limits.memory_bytes;
                         diagnosed_effective_graph = preparation_limits.memory_bytes;
                         resource_stage = "task-expansion";
-                        if (!scalar_application && schedule != "graph" && !limits.max_steps) {
+                        // Pattern windows are worthwhile once the parameterized
+                        // loop has enough outer iterations to amortize its
+                        // pause points. Tiny shapes retain the existing graph
+                        // path, including its serial-small-workload choice.
+                        const auto q = static_cast<std::size_t>(n / b);
+                        if (!scalar_application && mode != "serial" &&
+                            schedule != "graph" && !limits.max_steps && q > 2) {
                             resource_stage = "pattern-workspace";
                             const auto scratch = static_cast<std::size_t>(b) * b * sizeof(double);
                             if (scratch > case_budget / planned_workers)
