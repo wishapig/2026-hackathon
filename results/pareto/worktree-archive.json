@@ -1,0 +1,95 @@
+{
+  "purpose": "Source commit/branch records retained before deleting completed temporary worktrees; no branch or pareto tag is removed",
+  "worktrees": [
+    {
+      "worktree": "/home/wishapig/hackathon",
+      "HEAD": "fa9a0b854a98945a14522963f07b7cc011931a17",
+      "branch": "refs/heads/main"
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-worktrees/baseline",
+      "HEAD": "c410f80ab80f9e2468edbc030fc864ca3a233a71",
+      "detached": ""
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-worktrees/candidate2",
+      "HEAD": "4416907b582b3c0201e92425dbaf0db046c814fd",
+      "detached": ""
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-worktrees/candidate3",
+      "HEAD": "bab43941871b48a2b53980a1a58592f0ded99d77",
+      "detached": ""
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-worktrees/candidate4",
+      "HEAD": "0b9a05223a7b9d7a9257235a496103758536d6be",
+      "detached": ""
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-worktrees/candidate5",
+      "HEAD": "4a31fc3ff177f863f5e162ec3262a57a6b278640",
+      "detached": ""
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-worktrees/candidate6",
+      "HEAD": "bbdc09e83747952d9f36948819668e115269d4d6",
+      "detached": ""
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-worktrees/candidate7",
+      "HEAD": "bbdc09e83747952d9f36948819668e115269d4d6",
+      "detached": ""
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-worktrees/codec",
+      "HEAD": "3002f20a777fb852faa4f94755a64391bed32f9e",
+      "branch": "refs/heads/opt/codec"
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-worktrees/evaluation",
+      "HEAD": "1afcdb778cc3ee1806b81dcee3ca80a356aca950",
+      "branch": "refs/heads/opt/evaluation"
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-worktrees/evaluator",
+      "HEAD": "c9a8fafa67442d2f21c9410b2bc9d4c4454c71d1",
+      "branch": "refs/heads/opt/evaluator"
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-worktrees/global-priority",
+      "HEAD": "d4e0a9b3cdc2b659e5ce452b428f4d441e600fbd",
+      "branch": "refs/heads/opt/global-priority"
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-worktrees/grid",
+      "HEAD": "270d410f7f9a680499c506b6e5bec87bf60551c5",
+      "branch": "refs/heads/opt/grid"
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-worktrees/idle",
+      "HEAD": "d3a25d3e86016d01844731bb3af145612cf4292f",
+      "branch": "refs/heads/opt/idle"
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-worktrees/linear",
+      "HEAD": "20d8373946839b3a94dda30f44a8b64d7115a5db",
+      "detached": ""
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-worktrees/priority",
+      "HEAD": "27e83642b87e5ce060e4d67da0ddcd9fe4af0c5e",
+      "branch": "refs/heads/opt/priority"
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-worktrees/report-final",
+      "HEAD": "37cb6d6f3b284d5ee3d8b141627c81dcbf06710a",
+      "branch": "refs/heads/opt/report-final"
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-worktrees/scheduler",
+      "HEAD": "94c6620ecf7d927b54282aef8ee78533804ad66f",
+      "branch": "refs/heads/opt/scheduler"
+    }
+  ]
+}

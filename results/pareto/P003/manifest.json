@@ -1,7 +1,7 @@
 {
   "candidate": "P003",
   "implementation_commit": "bab43941871b48a2b53980a1a58592f0ded99d77",
-  "status": "accepted-local; P002 dominance unresolved due to timing noise",
+  "status": "superseded-local-by-P005",
   "configuration_class": "portable-default",
   "configuration": {
     "threads": 0,
@@ -112,5 +112,7 @@
   "limitations": [
     "Formal target validation unavailable",
     "P002/P003 noise overlap; retain both pending interleaved comparison"
-  ]
+  ],
+  "superseded_by": "P005",
+  "dominance_evidence": "../revalidation-20261030/P003-intermediate.json"
 }

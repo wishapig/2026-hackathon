@@ -2,6 +2,8 @@
 
 每次工作先读 [REQUIREMENTS.md](REQUIREMENTS.md)，这是唯一需求规范。本文仅说明当前程序用法。
 
+**比赛推荐与准确提交命令见 [SUBMISSION.md](SUBMISSION.md)。** 推荐P005（257字节Metadata）；当前build已更新并与其被测二进制哈希一致。默认资源自适应，不携带本机线程/内存覆盖。正式库和目标机未验证。
+
 Python 编译器将支持的源码子集与算子契约转换为 Metadata；C++ runtime 按实际参数构图并调用公共 cholesky/trsm/madd。按后续回复，当前验收使用 public20 的 `count + [n, b, matrix]` 协议；原题面格式另有显式兼容模式。
 
 ## 一条命令完成本地验收

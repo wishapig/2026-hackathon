@@ -1,7 +1,7 @@
 {
   "candidate": "P001",
   "implementation_commit": "c410f80ab80f9e2468edbc030fc864ca3a233a71",
-  "status": "accepted-local-baseline",
+  "status": "superseded-local-by-P005",
   "configuration_class": "local-tuned",
   "configuration": {
     "threads": 16,
@@ -67,5 +67,7 @@
     "Original fixed 256 MiB graph ceiling; baseline only, not R25-complete"
   ],
   "interleaved_revalidation": "../revalidation-20261030/P001.json",
-  "dominance_note": "P004/P005 retained: speed noise overlaps; baseline remains historical fallback, smaller/faster successors observed"
+  "dominance_note": "P004/P005 retained: speed noise overlaps; baseline remains historical fallback, smaller/faster successors observed",
+  "superseded_by": "P005",
+  "dominance_evidence": "../revalidation-20261030/P001.json"
 }

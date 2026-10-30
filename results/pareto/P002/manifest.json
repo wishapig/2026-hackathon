@@ -1,7 +1,7 @@
 {
   "candidate": "P002",
   "implementation_commit": "4416907b582b3c0201e92425dbaf0db046c814fd",
-  "status": "accepted-local-portable-default",
+  "status": "superseded-local-by-P005",
   "configuration_class": "portable-default",
   "configuration": {
     "threads": 0,
@@ -115,5 +115,7 @@
     "Formal judge archive and Kunpeng Ubuntu22.04 unavailable",
     "Only finite sampled correctness, no claim all shapes executed",
     "P001 local configuration differs; rerun comparison required before final dominance confirmation"
-  ]
+  ],
+  "superseded_by": "P005",
+  "dominance_evidence": "../revalidation-20261030/P002-intermediate.json"
 }

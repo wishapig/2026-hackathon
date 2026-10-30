@@ -14,10 +14,10 @@
 | --- | --- | --- |
 | 源码前端 | [compile.py](../compiler/compile.py) 使用 Python 标准库解析严格结构化 C++ 子集，支持完整 demo，拒绝未建模语法 | 不是 Clang AST，不支持任意 C++ 或完整预处理器；具体限制见 [前端说明](../compiler/README.md) |
 | 算子契约 | 外部 catalog 指定 ABI 与矩形读写区域，调用点替换参数；符号用于查契约 | 契约为受信输入，哈希不证明访问声明正确；更换库需要核对 |
-| Metadata | 参数化 let/for/if/call/copy/zero_upper 程序、前缀表达式、展开的访问表达式 | 未采用完整 varint、表达式 DAG 去重或压缩后继编码 |
-| 参数绑定 | [metadata.cpp](../src/metadata.cpp) 解码、验证、受检求值，按 n/b 展开任务或原顺序流式执行 | 展开受资源与算术限制，不承诺无限规模 |
-| 依赖 | [graph.cpp](../src/graph.cpp) 按实际物理区域划分访问等价类，维护 last-writer/all-readers，构造 RAW/WAR/WAW 并去重为 CSR | 不是完全离线符号依赖求解或纯隐式后继；没有 Cholesky 专用后继公式 |
-| 并行执行 | [runtime.cpp](../src/runtime.cpp) 可复用线程池、线程本地队列/窃取、atomic 与 owner 两种后端、有界批处理、失败排空 | 未实现链压缩、窗口回收、JIT、复杂关键路径优先级或自动成本模型调参 |
+| Metadata | 参数化程序及访问表达式；schema位置化、二进制token、完整哈希与可选zlib | 未采用完整 varint、表达式 DAG 去重或压缩后继编码 |
+| 参数绑定 | [metadata.cpp](../src/metadata.cpp) 解码、验证、词法槽位/整数opcode绑定，按n/b受检展开或流式执行 | 展开受资源与算术限制，不承诺无限规模 |
+| 依赖 | [graph.cpp](../src/graph.cpp) 统一对齐矩形分区证明后直接用整数块ID；不适用时按实际物理区域划分访问等价类；维护last-writer/all-readers，构造 RAW/WAR/WAW 并去重为 CSR | 不是完全离线符号依赖求解或纯隐式后继；没有 Cholesky 专用后继公式 |
+| 并行执行 | [runtime.cpp](../src/runtime.cpp) 可复用线程池、线程本地队列/窃取、atomic/owner后端、就绪后继直接续执行、有界批处理、失败排空 | 未实现链压缩、窗口回收、JIT、复杂关键路径优先级或自动成本模型调参 |
 | 应用 | [main.cpp](../src/main.cpp) 真实调用公共 cholesky/trsm/madd，按顺序处理多 case，临时文件成功后 rename | 默认 blocked 模式仅绑定公共三算子；显式 scalar 模式绑定通用标量表达式；其他外部算子仍须自己的 ABI 适配器 |
 | 数值校验 | [check_result.cpp](../tools/check_result.cpp) 检查有限值、正对角线、残差及中间运算有限性 | 校验独立于计时程序；原始 public verifier 仍保留用于互操作验证 |
 
@@ -25,13 +25,13 @@
 
 ## 文件格式与参数语义
 
-Metadata 兼容原始 `DAGMETA1`，默认自动选择更小的 `DAGMETA2` zlib压缩容器。两者均保留完整参数化语义及原载荷校验，解码有大小、流结束与预算检查。原始格式是 8 字节 `DAGMETA1`、uint64LE payload 长度、uint64LE FNV-1a 校验值，加 UTF-8 紧凑确定性 JSON。24 字节容器内保存 schema_version、source_digest、contract_digest、operators、program、frontend、parameter_guards。FNV 仅检测意外损坏，不认证来源。
+Metadata兼容DAGMETA1至DAGMETA6。编译器默认比较原始JSON、位置化JSON、通用二进制token及各自zlib容器，选择最小产物。固定schema位置和二进制token只压缩表示，不内置算法模板；保留源码与访问契约SHA-256、完整参数化程序与访问表达式。24字节头记录格式、解码长度与FNV校验；解码检查大小、流结束、节点数、深度及内存预算。FNV检测意外损坏，不认证来源。格式详情见compiler/README.md。
 
 当前“隐式依赖表示”的语义是：对参数 p，程序树定义按源顺序排列的任务 T(p)，每个任务定义读写区域 R/W；任意先后任务 x、y 在 W(x)∩R(y)、R(x)∩W(y) 或 W(x)∩W(y) 非空时构成必须保持的冲突顺序。因而文件与通用解释规则共同确定所有参数实例的依赖，不需要算法专用后继公式。运行时区域版本算法用 last-writer/all-readers 构造保持这些冲突可达性的 CSR。
 
 这说明当前文件如何确定依赖，**不等同于离线求出了符号前驱/后继式**。按已有回复，Metadata 内容由方案决定，不额外设置直接关系式门槛；仍须如实说明上述源码与依赖表示的对应，不能以文件小或某些样本正确代替语义论证。
 
-当前构建产物大小：分块 Cholesky **1839 字节**、朴素 Cholesky **2186 字节**、wavefront **886 字节**。参数来自输入；同一 Metadata 绑定不同 n/b，不含 case、seed 或文件名特判及预存结果。
+P005实测分块Metadata为 **257字节**（原始JSON容器1839字节），朴素示例252字节，wavefront183字节。同一Metadata绑定不同n/b，不含case、seed或文件名特判及预存结果。
 
 解码检查长度、校验和、重复键、未知字段、深度与资源限制。严格前端标记启用受检源程序 32 位 int 语义；通用表达式另有受检 64 位求值。前端拒绝八进制/前导零整数、反斜杠换行、未知头文件和不支持的宏。只接受文档规定的受信、未修改头文件。
 
@@ -51,3 +51,7 @@ NUMA CPU 集来自进程亲和集与 sysfs 节点列表的交集，选择第一�
 
 `DAG_MEMORY_MB` 未设时自动规划单 NUMA 可用内存、系统可用、进程/cgroup 剩余额度的最小值并保留 20% 余量，显式设置为额外上限。`DAG_GRAPH_MEMORY_MB` 未设置或0时按case剩余预算自动规划，正值作为额外上限，超限转流式，不拒绝整个合法实例。预算含矩阵、Metadata、任务/图、线程栈及按实际任务的算子绑定估计工作空间（demo trsm 为每 worker b*b doubles；无 trsm 的实例不作此预留）。它不是精确峰值 RSS 或系统级内存保留；正式库工作空间需重新核对。`graph_bytes` 是保留存储估算，不能报告为精确峰值 RSS。
 
+
+## 本轮比赛优化交付
+
+推荐实现P005：bbdc09e83747952d9f36948819668e115269d4d6，默认自动资源、atomic、batch=1。准确命令和本地/正式验证边界见根目录SUBMISSION.md；全量验收和原始数据见results/pareto/P005。局部/全局关键路径优先级没有稳定收益，未进入推荐路径。

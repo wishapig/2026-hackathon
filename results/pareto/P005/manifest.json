@@ -1,7 +1,7 @@
 {
   "candidate": "P005",
   "implementation_commit": "bbdc09e83747952d9f36948819668e115269d4d6",
-  "status": "accepted-local; minimum metadata; P004 speed comparison pending interleaved measurement",
+  "status": "recommended-local-portable-default; formal-target-unverified",
   "configuration_class": "portable-default",
   "configuration": {
     "threads": 0,
@@ -156,5 +156,20 @@
     "Finite sampled correctness; not exhaustive shape proof"
   ],
   "interleaved_revalidation": "../revalidation-20261030/P005.json",
-  "dominance_note": "P004/P005 retained: speed noise overlaps; baseline remains historical fallback, smaller/faster successors observed"
+  "dominance_note": "P004/P005 retained: speed noise overlaps; baseline remains historical fallback, smaller/faster successors observed",
+  "final_boundary_checks": [
+    "Exact final binary n10000,b100,A=4I outputs L=2I; parallel/no resource fallback",
+    "Exact final binary n512,b1,A=4I completes22500866 semantic tasks with1MiB graph cap; marked serial-resource, excluded from speed statistics",
+    "Exact final binary fatal8MiB case sequence classifies completed-unvalidated/resource-failed/not-run with explicit budget evidence",
+    "Actual external-static-library linking branch passes supplied verifier20/20 and strict20/20 using clearly labeled local demo archive, not judge archive"
+  ],
+  "final_encoding_comparison": "../final-encoding-comparison/P005.json",
+  "final_pareto_decision": "retain P005 and P006 because speed is indistinguishable within noise; recommend P005 for smaller metadata",
+  "build_configuration": {
+    "build_type": "Release",
+    "DAG_METADATA_ENCODING": "auto",
+    "DAG_REQUIRE_OFFICIAL": false,
+    "DAG_OFFICIAL_LIBRARY": ""
+  },
+  "retained_metadata_artifact": "block_cholesky.meta"
 }

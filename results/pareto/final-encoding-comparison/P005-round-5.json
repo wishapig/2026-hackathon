@@ -1,0 +1,1002 @@
+{
+  "program": "/home/wishapig/hackathon-worktrees/candidate6/build-candidate/dag_run",
+  "program_sha256": "be609835506a444c279b5967e8fda289e0abff19c907731f8e211dc9fd60cc3a",
+  "input": "/home/wishapig/hackathon-worktrees/candidate6/artifacts/acceptance/P005/public20-qlewxkmp/public20.bin",
+  "input_sha256": "bde56240c28d5c002f8903f5b6fedbf5dc71ebe4835bfc92e62b2cb028b5cff3",
+  "metadata": "/home/wishapig/hackathon-worktrees/candidate6/build-candidate/block_cholesky.meta",
+  "metadata_sha256": "2778cf3bd3230f527f0bb3eed34dff8423e1e239a64d3963ee34bec7e6362c4a",
+  "metadata_bytes": 257,
+  "checker": "/home/wishapig/hackathon-worktrees/candidate6/build-candidate/dag_check",
+  "checker_sha256": "862d527e934f7379313c060c6c0a3d21cb6ca10ebd1193460b6fe3a3f1927be0",
+  "requirements": [
+    "R-06",
+    "R-12",
+    "R-15",
+    "R-18",
+    "R-21",
+    "R-22",
+    "R-23",
+    "R-24",
+    "R-25",
+    "R-26"
+  ],
+  "protocol": "public",
+  "application": "blocked",
+  "environment": {
+    "DAG_THREADS": "0",
+    "DAG_MODE": "auto",
+    "DAG_BATCH": "1",
+    "DAG_BACKEND": "atomic",
+    "DAG_IO_FORMAT": "public",
+    "DAG_APPLICATION": "blocked",
+    "DAG_CHECK_THREADS": "4",
+    "DAG_METADATA": "/home/wishapig/hackathon-worktrees/candidate6/build-candidate/block_cholesky.meta"
+  },
+  "environment_policy": {
+    "clean": true,
+    "removed": {},
+    "inherited": {},
+    "explicit": {
+      "DAG_THREADS": "0",
+      "DAG_MODE": "auto",
+      "DAG_CHECK_THREADS": "4",
+      "DAG_METADATA": "/home/wishapig/hackathon-worktrees/candidate6/build-candidate/block_cholesky.meta"
+    },
+    "defaults": {
+      "DAG_BATCH": "1",
+      "DAG_BACKEND": "atomic",
+      "DAG_IO_FORMAT": "public",
+      "DAG_APPLICATION": "blocked"
+    },
+    "effective_controls": {
+      "DAG_THREADS": "0",
+      "DAG_MODE": "auto",
+      "DAG_BATCH": "1",
+      "DAG_BACKEND": "atomic",
+      "DAG_IO_FORMAT": "public",
+      "DAG_APPLICATION": "blocked",
+      "DAG_CHECK_THREADS": "4",
+      "DAG_METADATA": "/home/wishapig/hackathon-worktrees/candidate6/build-candidate/block_cholesky.meta"
+    }
+  },
+  "validation_scope": "Selected checker. Use accept-public20 for the supplied verifier workflow.",
+  "configuration": {
+    "threads": 0,
+    "batch": 1,
+    "mode": "auto",
+    "backend": "atomic"
+  },
+  "scope": "Each sample is a fresh process; warmups affect OS caches, not reusable process resources.",
+  "summary": {
+    "metadata_bytes": 257,
+    "successful_samples": 1,
+    "full_batch_samples": 1,
+    "measured_samples": 1,
+    "resource_limited_samples": 0,
+    "complete_performance": true,
+    "median_seconds": 0.28227984300000003,
+    "min_seconds": 0.28227984300000003,
+    "max_seconds": 0.28227984300000003
+  },
+  "samples": [
+    {
+      "index": 0,
+      "warmup": false,
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "cases=20 score_seconds=0.282279843 matrix_io_seconds=0.053834429\n",
+      "process_wall_seconds": 0.339481244000126,
+      "score_seconds": 0.28227984300000003,
+      "runtime_stats": {
+        "kernel_mode": "demo-local-debug",
+        "application": "blocked",
+        "io_format": "public",
+        "mode": "auto",
+        "backend": "atomic",
+        "memory_budget_bytes": 3670006170,
+        "requested_memory_bytes": 0,
+        "graph_budget_bytes": 0,
+        "graph_budget_source": "automatic",
+        "memory_budget_source": "automatic",
+        "threads_requested": 0,
+        "batch": 1,
+        "max_tasks": 0,
+        "max_steps": 0,
+        "metadata_bytes": 257,
+        "source_digest": "11134a06512ec865f51635b7b8e2e092ce49f09b4bedee426a501665febcb0a4",
+        "contract_digest": "27ae883c7dc015a6bfa0b6a37490df5c5aa14bb0ce6642005e7acfcda0500c6f",
+        "score_seconds": 0.28227984300000003,
+        "matrix_io_seconds": 0.05383442899999998,
+        "common_finalize_seconds": 0.0010595800000000044,
+        "cpus": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23
+        ],
+        "cases": [
+          {
+            "index": 0,
+            "n": 128,
+            "b": 8,
+            "execution_mode": "parallel",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 3643356150,
+            "case_memory_budget_bytes": 3668635638,
+            "tasks": 818,
+            "phase_tasks": 2,
+            "edges": 2040,
+            "workers": 24,
+            "steals": 58,
+            "graph_bytes": 418984,
+            "prepare_seconds": 0.001279357,
+            "execute_seconds": 0.00056109,
+            "compute_seconds": 0.0020678130000000004
+          },
+          {
+            "index": 1,
+            "n": 128,
+            "b": 32,
+            "execution_mode": "serial-small-workload",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 3643352118,
+            "case_memory_budget_bytes": 3668635638,
+            "tasks": 22,
+            "phase_tasks": 0,
+            "edges": 0,
+            "workers": 1,
+            "steals": 0,
+            "graph_bytes": 0,
+            "prepare_seconds": 2.4293e-05,
+            "execute_seconds": 0.000119194,
+            "compute_seconds": 0.000323015
+          },
+          {
+            "index": 2,
+            "n": 128,
+            "b": 128,
+            "execution_mode": "serial-small-workload",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 3643352118,
+            "case_memory_budget_bytes": 3668635638,
+            "tasks": 3,
+            "phase_tasks": 0,
+            "edges": 0,
+            "workers": 1,
+            "steals": 0,
+            "graph_bytes": 0,
+            "prepare_seconds": 1.2192e-05,
+            "execute_seconds": 9.2466e-05,
+            "compute_seconds": 0.00020888799999999996
+          },
+          {
+            "index": 3,
+            "n": 256,
+            "b": 16,
+            "execution_mode": "parallel",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 3642516534,
+            "case_memory_budget_bytes": 3667849206,
+            "tasks": 818,
+            "phase_tasks": 2,
+            "edges": 2040,
+            "workers": 24,
+            "steals": 32,
+            "graph_bytes": 418984,
+            "prepare_seconds": 0.000291799,
+            "execute_seconds": 0.000756455,
+            "compute_seconds": 0.001465505
+          },
+          {
+            "index": 4,
+            "n": 256,
+            "b": 64,
+            "execution_mode": "parallel",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 3641779254,
+            "case_memory_budget_bytes": 3667849206,
+            "tasks": 22,
+            "phase_tasks": 2,
+            "edges": 30,
+            "workers": 24,
+            "steals": 7,
+            "graph_bytes": 10064,
+            "prepare_seconds": 3.5592e-05,
+            "execute_seconds": 0.000798792,
+            "compute_seconds": 0.000991771
+          },
+          {
+            "index": 5,
+            "n": 256,
+            "b": 256,
+            "execution_mode": "serial-small-workload",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 3642581606,
+            "case_memory_budget_bytes": 3667849206,
+            "tasks": 3,
+            "phase_tasks": 0,
+            "edges": 0,
+            "workers": 1,
+            "steals": 0,
+            "graph_bytes": 0,
+            "prepare_seconds": 1.7399e-05,
+            "execute_seconds": 0.000803728,
+            "compute_seconds": 0.0009623380000000001
+          },
+          {
+            "index": 6,
+            "n": 384,
+            "b": 16,
+            "execution_mode": "parallel",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 3641221734,
+            "case_memory_budget_bytes": 3666538486,
+            "tasks": 2602,
+            "phase_tasks": 2,
+            "edges": 6900,
+            "workers": 24,
+            "steals": 142,
+            "graph_bytes": 1436280,
+            "prepare_seconds": 0.001104629,
+            "execute_seconds": 0.00175299,
+            "compute_seconds": 0.003759678
+          },
+          {
+            "index": 7,
+            "n": 384,
+            "b": 48,
+            "execution_mode": "parallel",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 3640776918,
+            "case_memory_budget_bytes": 3666538486,
+            "tasks": 122,
+            "phase_tasks": 2,
+            "edges": 252,
+            "workers": 24,
+            "steals": 12,
+            "graph_bytes": 57304,
+            "prepare_seconds": 0.000106405,
+            "execute_seconds": 0.001363079,
+            "compute_seconds": 0.0017195459999999997
+          },
+          {
+            "index": 8,
+            "n": 384,
+            "b": 96,
+            "execution_mode": "parallel",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 3639499414,
+            "case_memory_budget_bytes": 3666538486,
+            "tasks": 22,
+            "phase_tasks": 2,
+            "edges": 30,
+            "workers": 24,
+            "steals": 7,
+            "graph_bytes": 10064,
+            "prepare_seconds": 3.5544e-05,
+            "execute_seconds": 0.001906579,
+            "compute_seconds": 0.0021356429999999996
+          },
+          {
+            "index": 9,
+            "n": 768,
+            "b": 24,
+            "execution_mode": "parallel",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 3634082406,
+            "case_memory_budget_bytes": 3659460598,
+            "tasks": 5986,
+            "phase_tasks": 2,
+            "edges": 16368,
+            "workers": 24,
+            "steals": 284,
+            "graph_bytes": 3194184,
+            "prepare_seconds": 0.003781489,
+            "execute_seconds": 0.008858774,
+            "compute_seconds": 0.016142325
+          },
+          {
+            "index": 10,
+            "n": 768,
+            "b": 48,
+            "execution_mode": "parallel",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 3633631350,
+            "case_memory_budget_bytes": 3659460598,
+            "tasks": 818,
+            "phase_tasks": 2,
+            "edges": 2040,
+            "workers": 24,
+            "steals": 180,
+            "graph_bytes": 418984,
+            "prepare_seconds": 0.000510707,
+            "execute_seconds": 0.00616975,
+            "compute_seconds": 0.007576250999999998
+          },
+          {
+            "index": 11,
+            "n": 768,
+            "b": 128,
+            "execution_mode": "parallel",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 3631031350,
+            "case_memory_budget_bytes": 3659460598,
+            "tasks": 58,
+            "phase_tasks": 2,
+            "edges": 105,
+            "workers": 24,
+            "steals": 22,
+            "graph_bytes": 26604,
+            "prepare_seconds": 8.2133e-05,
+            "execute_seconds": 0.008514527999999999,
+            "compute_seconds": 0.009123754999999999
+          },
+          {
+            "index": 12,
+            "n": 1536,
+            "b": 48,
+            "execution_mode": "parallel",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 3605438358,
+            "case_memory_budget_bytes": 3631149046,
+            "tasks": 5986,
+            "phase_tasks": 2,
+            "edges": 16368,
+            "workers": 24,
+            "steals": 1046,
+            "graph_bytes": 3194184,
+            "prepare_seconds": 0.002207666,
+            "execute_seconds": 0.019969144999999997,
+            "compute_seconds": 0.03631374600000001
+          },
+          {
+            "index": 13,
+            "n": 1536,
+            "b": 64,
+            "execution_mode": "parallel",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 3603782042,
+            "case_memory_budget_bytes": 3629955354,
+            "tasks": 2602,
+            "phase_tasks": 2,
+            "edges": 6900,
+            "workers": 24,
+            "steals": 699,
+            "graph_bytes": 1436280,
+            "prepare_seconds": 0.001375008,
+            "execute_seconds": 0.023423942,
+            "compute_seconds": 0.026989640000000002
+          },
+          {
+            "index": 14,
+            "n": 1536,
+            "b": 128,
+            "execution_mode": "parallel",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 3586352743,
+            "case_memory_budget_bytes": 3614817671,
+            "tasks": 366,
+            "phase_tasks": 2,
+            "edges": 858,
+            "workers": 24,
+            "steals": 198,
+            "graph_bytes": 190624,
+            "prepare_seconds": 0.000263787,
+            "execute_seconds": 0.029052985000000003,
+            "compute_seconds": 0.031356303999999995
+          },
+          {
+            "index": 15,
+            "n": 1536,
+            "b": 256,
+            "execution_mode": "parallel",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 3560813364,
+            "case_memory_budget_bytes": 3598670756,
+            "tasks": 58,
+            "phase_tasks": 2,
+            "edges": 105,
+            "workers": 24,
+            "steals": 26,
+            "graph_bytes": 26604,
+            "prepare_seconds": 0.000104697,
+            "execute_seconds": 0.075204325,
+            "compute_seconds": 0.076997496
+          },
+          {
+            "index": 16,
+            "n": 256,
+            "b": 32,
+            "execution_mode": "parallel",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 3583960679,
+            "case_memory_budget_bytes": 3609425607,
+            "tasks": 122,
+            "phase_tasks": 2,
+            "edges": 252,
+            "workers": 24,
+            "steals": 40,
+            "graph_bytes": 57304,
+            "prepare_seconds": 0.000102855,
+            "execute_seconds": 0.000752034,
+            "compute_seconds": 0.002111678000000006
+          },
+          {
+            "index": 17,
+            "n": 384,
+            "b": 32,
+            "execution_mode": "parallel",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 3582289511,
+            "case_memory_budget_bytes": 3607755719,
+            "tasks": 366,
+            "phase_tasks": 2,
+            "edges": 858,
+            "workers": 24,
+            "steals": 131,
+            "graph_bytes": 190624,
+            "prepare_seconds": 0.000210642,
+            "execute_seconds": 0.002246404,
+            "compute_seconds": 0.0030322150000000048
+          },
+          {
+            "index": 18,
+            "n": 768,
+            "b": 64,
+            "execution_mode": "parallel",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 3573176730,
+            "case_memory_budget_bytes": 3599237642,
+            "tasks": 366,
+            "phase_tasks": 2,
+            "edges": 858,
+            "workers": 24,
+            "steals": 115,
+            "graph_bytes": 190624,
+            "prepare_seconds": 0.000237632,
+            "execute_seconds": 0.004491481,
+            "compute_seconds": 0.007785062999999997
+          },
+          {
+            "index": 19,
+            "n": 1536,
+            "b": 32,
+            "execution_mode": "parallel",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 3534926644,
+            "case_memory_budget_bytes": 3560397732,
+            "tasks": 19602,
+            "phase_tasks": 2,
+            "edges": 55272,
+            "workers": 24,
+            "steals": 2214,
+            "graph_bytes": 11135464,
+            "prepare_seconds": 0.011786765,
+            "execute_seconds": 0.024759078,
+            "compute_seconds": 0.05015759300000001
+          }
+        ]
+      },
+      "validation": {
+        "returncode": 0,
+        "stdout": "case=0 n=128 b=8 scaled_residual=0.0079433586879240712 status=PASS\ncase=1 n=128 b=32 scaled_residual=0.0061838954490553997 status=PASS\ncase=2 n=128 b=128 scaled_residual=0.0035065173853155419 status=PASS\ncase=3 n=256 b=16 scaled_residual=0.0042268257015722907 status=PASS\ncase=4 n=256 b=64 scaled_residual=0.0037366817918734214 status=PASS\ncase=5 n=256 b=256 scaled_residual=0.0014357563282621285 status=PASS\ncase=6 n=384 b=16 scaled_residual=0.002818418940718615 status=PASS\ncase=7 n=384 b=48 scaled_residual=0.0024235710694046272 status=PASS\ncase=8 n=384 b=96 scaled_residual=0.0026352701185438318 status=PASS\ncase=9 n=768 b=24 scaled_residual=0.0015901984570387091 status=PASS\ncase=10 n=768 b=48 scaled_residual=0.0015582119350493911 status=PASS\ncase=11 n=768 b=128 scaled_residual=0.0017687088102770168 status=PASS\ncase=12 n=1536 b=48 scaled_residual=0.00088612576315533448 status=PASS\ncase=13 n=1536 b=64 scaled_residual=0.00088350749285448689 status=PASS\ncase=14 n=1536 b=128 scaled_residual=0.0010009060482178442 status=PASS\ncase=15 n=1536 b=256 scaled_residual=0.0013249114018248119 status=PASS\ncase=16 n=256 b=32 scaled_residual=0.0037525336574576813 status=PASS\ncase=17 n=384 b=32 scaled_residual=0.0025858722667198046 status=PASS\ncase=18 n=768 b=64 scaled_residual=0.001482969119184588 status=PASS\ncase=19 n=1536 b=32 scaled_residual=0.00092470762179605701 status=PASS\n",
+        "stderr": ""
+      },
+      "resource_failures": [],
+      "resource_exclusions": [],
+      "valid_case_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19
+      ],
+      "correctness_passed": true,
+      "resource_limited": false,
+      "full_batch_eligible": true,
+      "failure_class": "none",
+      "case_categories": {
+        "valid": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19
+        ],
+        "resource_limited": [],
+        "completed_unvalidated": [],
+        "resource_failed": [],
+        "not_run": [],
+        "error_or_unknown": []
+      },
+      "case_counts": {
+        "valid": 20,
+        "resource_limited": 0,
+        "completed_unvalidated": 0,
+        "resource_failed": 0,
+        "not_run": 0,
+        "error_or_unknown": 0
+      }
+    }
+  ],
+  "input_cases": [
+    {
+      "index": 0,
+      "n": 128,
+      "b": 8
+    },
+    {
+      "index": 1,
+      "n": 128,
+      "b": 32
+    },
+    {
+      "index": 2,
+      "n": 128,
+      "b": 128
+    },
+    {
+      "index": 3,
+      "n": 256,
+      "b": 16
+    },
+    {
+      "index": 4,
+      "n": 256,
+      "b": 64
+    },
+    {
+      "index": 5,
+      "n": 256,
+      "b": 256
+    },
+    {
+      "index": 6,
+      "n": 384,
+      "b": 16
+    },
+    {
+      "index": 7,
+      "n": 384,
+      "b": 48
+    },
+    {
+      "index": 8,
+      "n": 384,
+      "b": 96
+    },
+    {
+      "index": 9,
+      "n": 768,
+      "b": 24
+    },
+    {
+      "index": 10,
+      "n": 768,
+      "b": 48
+    },
+    {
+      "index": 11,
+      "n": 768,
+      "b": 128
+    },
+    {
+      "index": 12,
+      "n": 1536,
+      "b": 48
+    },
+    {
+      "index": 13,
+      "n": 1536,
+      "b": 64
+    },
+    {
+      "index": 14,
+      "n": 1536,
+      "b": 128
+    },
+    {
+      "index": 15,
+      "n": 1536,
+      "b": 256
+    },
+    {
+      "index": 16,
+      "n": 256,
+      "b": 32
+    },
+    {
+      "index": 17,
+      "n": 384,
+      "b": 32
+    },
+    {
+      "index": 18,
+      "n": 768,
+      "b": 64
+    },
+    {
+      "index": 19,
+      "n": 1536,
+      "b": 32
+    }
+  ],
+  "kernel_library": {
+    "path": "/home/wishapig/hackathon-worktrees/candidate6/build-candidate/libcontest_kernels.a",
+    "sha256": "3f8adfdc48cdea6a64b7c9d47d7758321c2e216f853f95a5f9300ca9a931588d"
+  },
+  "environment_identity": {
+    "platform": "Linux-6.6.114.1-microsoft-standard-WSL2-x86_64-with-glibc2.43",
+    "hostname": "LAPTOP-3B2P990A",
+    "cpu_model": "Intel(R) Core(TM) i7-14650HX",
+    "affinity": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23
+    ],
+    "rlimit_as": [
+      -1,
+      -1
+    ],
+    "rlimit_data": [
+      -1,
+      -1
+    ],
+    "budgets": {
+      "DAG_MEMORY_MB": null,
+      "DAG_GRAPH_MEMORY_MB": "0",
+      "DAG_MAX_TASKS": "0",
+      "DAG_MAX_STEPS": "0"
+    },
+    "cgroup_constraints": {
+      "membership": "0::/init.scope",
+      "mountinfo_available": true,
+      "mounts": [
+        {
+          "type": "cgroup2",
+          "controller": "unified",
+          "root": "/",
+          "mount": "/sys/fs/cgroup",
+          "membership": "/init.scope",
+          "namespace_root_fallback": false,
+          "ancestors": [
+            {
+              "path": "/sys/fs/cgroup/init.scope",
+              "limits": {
+                "memory.max": "max",
+                "cpuset.cpus": null,
+                "cpuset.mems": null,
+                "cpuset.cpus.effective": null,
+                "cpuset.mems.effective": null
+              }
+            },
+            {
+              "path": "/sys/fs/cgroup",
+              "limits": {
+                "memory.max": null,
+                "cpuset.cpus": null,
+                "cpuset.mems": null,
+                "cpuset.cpus.effective": "0-23",
+                "cpuset.mems.effective": "0"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "environment_fingerprint": "26f2acdacbdb5a5c5378a42291ae065bcad792a54c3e7ea6c915f8577ec3341e",
+  "common_case_diagnostic": {
+    "kind": "common_valid_case_compute_sum_diagnostic",
+    "not_full_batch_score": true,
+    "scope": {
+      "input_sha256": "bde56240c28d5c002f8903f5b6fedbf5dc71ebe4835bfc92e62b2cb028b5cff3",
+      "protocol": "public",
+      "application": "blocked",
+      "environment_fingerprint": "26f2acdacbdb5a5c5378a42291ae065bcad792a54c3e7ea6c915f8577ec3341e",
+      "kernel_sha256": "3f8adfdc48cdea6a64b7c9d47d7758321c2e216f853f95a5f9300ca9a931588d",
+      "cases": [
+        {
+          "index": 0,
+          "n": 128,
+          "b": 8
+        },
+        {
+          "index": 1,
+          "n": 128,
+          "b": 32
+        },
+        {
+          "index": 2,
+          "n": 128,
+          "b": 128
+        },
+        {
+          "index": 3,
+          "n": 256,
+          "b": 16
+        },
+        {
+          "index": 4,
+          "n": 256,
+          "b": 64
+        },
+        {
+          "index": 5,
+          "n": 256,
+          "b": 256
+        },
+        {
+          "index": 6,
+          "n": 384,
+          "b": 16
+        },
+        {
+          "index": 7,
+          "n": 384,
+          "b": 48
+        },
+        {
+          "index": 8,
+          "n": 384,
+          "b": 96
+        },
+        {
+          "index": 9,
+          "n": 768,
+          "b": 24
+        },
+        {
+          "index": 10,
+          "n": 768,
+          "b": 48
+        },
+        {
+          "index": 11,
+          "n": 768,
+          "b": 128
+        },
+        {
+          "index": 12,
+          "n": 1536,
+          "b": 48
+        },
+        {
+          "index": 13,
+          "n": 1536,
+          "b": 64
+        },
+        {
+          "index": 14,
+          "n": 1536,
+          "b": 128
+        },
+        {
+          "index": 15,
+          "n": 1536,
+          "b": 256
+        },
+        {
+          "index": 16,
+          "n": 256,
+          "b": 32
+        },
+        {
+          "index": 17,
+          "n": 384,
+          "b": 32
+        },
+        {
+          "index": 18,
+          "n": 768,
+          "b": 64
+        },
+        {
+          "index": 19,
+          "n": 1536,
+          "b": 32
+        }
+      ]
+    },
+    "scope_fingerprint": "e280714885f413246f7d8ffc760574de98ec6671e670ef6989e32434f75af295",
+    "case_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19
+    ],
+    "case_count": 20,
+    "total_case_count": 20,
+    "coverage": 1.0,
+    "excluded_case_indices": [],
+    "samples": [
+      {
+        "index": 0,
+        "case_compute_sum_seconds": 0.281220263
+      }
+    ],
+    "resource_exclusions": [],
+    "invalid_samples": [],
+    "case_status_by_sample": [
+      {
+        "sample": 0,
+        "case_categories": {
+          "valid": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19
+          ],
+          "resource_limited": [],
+          "completed_unvalidated": [],
+          "resource_failed": [],
+          "not_run": [],
+          "error_or_unknown": []
+        },
+        "case_counts": {
+          "valid": 20,
+          "resource_limited": 0,
+          "completed_unvalidated": 0,
+          "resource_failed": 0,
+          "not_run": 0,
+          "error_or_unknown": 0
+        }
+      }
+    ],
+    "case_sample_counts": {
+      "valid": 20,
+      "resource_limited": 0,
+      "completed_unvalidated": 0,
+      "resource_failed": 0,
+      "not_run": 0,
+      "error_or_unknown": 0
+    },
+    "case_sample_counts_unit": "case appearances across measured samples; not unique cases",
+    "median_case_compute_sum_seconds": 0.281220263
+  },
+  "correctness_passed": true,
+  "passed": true
+}

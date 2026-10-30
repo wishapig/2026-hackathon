@@ -1,7 +1,7 @@
 {
   "candidate": "P004",
   "implementation_commit": "0b9a05223a7b9d7a9257235a496103758536d6be",
-  "status": "accepted-local; leading measured candidate pending interleaved confirmation",
+  "status": "historical; replace with correctness-fixed P006 for larger-encoding alternative",
   "configuration_class": "portable-default",
   "configuration": {
     "threads": 0,
@@ -119,8 +119,10 @@
   ],
   "limitations": [
     "Formal target validation unavailable",
-    "All coverage is sampled; no claim exhaustive valid input domain"
+    "All coverage is sampled; no claim exhaustive valid input domain",
+    "Zero-trip-loop increment source corner was subsequently fixed in P005; P004 is a historical measured alternative, not the default submission recommendation"
   ],
   "interleaved_revalidation": "../revalidation-20261030/P004.json",
-  "dominance_note": "P004/P005 retained: speed noise overlaps; baseline remains historical fallback, smaller/faster successors observed"
+  "dominance_note": "P004/P005 retained: speed noise overlaps; baseline remains historical fallback, smaller/faster successors observed",
+  "superseded_by": "P006"
 }

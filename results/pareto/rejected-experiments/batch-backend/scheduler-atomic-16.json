@@ -1,0 +1,54 @@
+{
+  "source": "/home/wishapig/hackathon-worktrees/candidate4/artifacts/screening/scheduler-atomic-16.json",
+  "program_sha256": "aaa3f85780e824c947f0c758d073276556df648d62004b5db740d51f02c739fb",
+  "input_sha256": "bde56240c28d5c002f8903f5b6fedbf5dc71ebe4835bfc92e62b2cb028b5cff3",
+  "metadata_bytes": 292,
+  "configuration": {
+    "threads": 0,
+    "batch": 16,
+    "mode": "auto",
+    "backend": "atomic"
+  },
+  "environment": {
+    "DAG_THREADS": "0",
+    "DAG_MODE": "auto",
+    "DAG_BATCH": "16",
+    "DAG_BACKEND": "atomic",
+    "DAG_IO_FORMAT": "public",
+    "DAG_APPLICATION": "blocked",
+    "DAG_CHECK_THREADS": "4",
+    "DAG_METADATA": "/home/wishapig/hackathon-worktrees/candidate4/build-candidate/block_cholesky.meta"
+  },
+  "summary": {
+    "metadata_bytes": 292,
+    "successful_samples": 3,
+    "full_batch_samples": 3,
+    "measured_samples": 3,
+    "resource_limited_samples": 0,
+    "complete_performance": true,
+    "median_seconds": 0.28360422500000004,
+    "min_seconds": 0.28275072500000004,
+    "max_seconds": 0.29364777
+  },
+  "passed": true,
+  "samples": [
+    {
+      "warmup": false,
+      "score_seconds": 0.28360422500000004,
+      "returncode": 0,
+      "validation_returncode": 0
+    },
+    {
+      "warmup": false,
+      "score_seconds": 0.29364777,
+      "returncode": 0,
+      "validation_returncode": 0
+    },
+    {
+      "warmup": false,
+      "score_seconds": 0.28275072500000004,
+      "returncode": 0,
+      "validation_returncode": 0
+    }
+  ]
+}
