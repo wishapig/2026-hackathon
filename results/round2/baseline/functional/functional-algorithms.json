@@ -1,0 +1,1277 @@
+{
+  "kind": "functional_only",
+  "performance_eligible": false,
+  "requirements": [
+    "R-03",
+    "R-04",
+    "R-05",
+    "R-15",
+    "R-16",
+    "R-18",
+    "R-27"
+  ],
+  "scope": "Supplemental supported-subset examples; not the missing original source or full legal-domain coverage.",
+  "validation": {
+    "relative_tolerance": 1e-11,
+    "absolute_tolerance": 1e-12,
+    "cholesky": "Known dyadic positive-diagonal factor plus supplied verifier and dag_check",
+    "wavefront": "Exact Fraction reference evaluated column-first, independent of source traversal"
+  },
+  "algorithms": [
+    {
+      "name": "naive_cholesky",
+      "kind": "functional_only",
+      "performance_eligible": false,
+      "source": "/home/wishapig/hackathon-round2/baseline/examples/naive_cholesky.cpp",
+      "source_sha256": "ac9705cebdcc9c4d4796cf00b609dc6d6edec4ca798b16c44e7a90ecf763b193",
+      "catalog_sha256": "fc5c9df630b4aab8f8e961e7958a147bad416355b042bd349e7fa3786704797a",
+      "runs": [
+        {
+          "requested_mode": "serial",
+          "performance_eligible": false,
+          "runtime_diagnostics": {
+            "kernel_mode": "demo-local-debug",
+            "application": "scalar",
+            "io_format": "public",
+            "mode": "serial",
+            "backend": "atomic",
+            "memory_budget_bytes": 4200038400,
+            "requested_memory_bytes": 0,
+            "graph_budget_bytes": 0,
+            "graph_budget_source": "automatic",
+            "memory_budget_source": "automatic",
+            "threads_requested": 0,
+            "batch": 1,
+            "max_tasks": 0,
+            "max_steps": 0,
+            "metadata_bytes": 149,
+            "score_seconds": 0.001678281,
+            "matrix_io_seconds": 3.4042000000000004e-05,
+            "common_finalize_seconds": 0.000368216,
+            "cpus": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23
+            ],
+            "cases": [
+              {
+                "index": 0,
+                "n": 3,
+                "b": 1,
+                "execution_mode": "serial-stream",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 0,
+                "case_memory_budget_bytes": 4198918388,
+                "tasks": 12,
+                "phase_tasks": 0,
+                "edges": 0,
+                "workers": 1,
+                "steals": 0,
+                "graph_bytes": 0,
+                "prepare_seconds": 0,
+                "execute_seconds": 1.867e-05,
+                "compute_seconds": 0.000128654
+              },
+              {
+                "index": 1,
+                "n": 7,
+                "b": 1,
+                "execution_mode": "serial-stream",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 0,
+                "case_memory_budget_bytes": 4198917748,
+                "tasks": 86,
+                "phase_tasks": 0,
+                "edges": 0,
+                "workers": 1,
+                "steals": 0,
+                "graph_bytes": 0,
+                "prepare_seconds": 0,
+                "execute_seconds": 2.0939e-05,
+                "compute_seconds": 0.000112934
+              },
+              {
+                "index": 2,
+                "n": 16,
+                "b": 4,
+                "execution_mode": "serial-stream",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 0,
+                "case_memory_budget_bytes": 4198914436,
+                "tasks": 818,
+                "phase_tasks": 0,
+                "edges": 0,
+                "workers": 1,
+                "steals": 0,
+                "graph_bytes": 0,
+                "prepare_seconds": 0,
+                "execute_seconds": 0.000117941,
+                "compute_seconds": 0.00019965
+              },
+              {
+                "index": 3,
+                "n": 31,
+                "b": 1,
+                "execution_mode": "serial-stream",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 0,
+                "case_memory_budget_bytes": 4198903156,
+                "tasks": 5458,
+                "phase_tasks": 0,
+                "edges": 0,
+                "workers": 1,
+                "steals": 0,
+                "graph_bytes": 0,
+                "prepare_seconds": 0,
+                "execute_seconds": 0.00078349,
+                "compute_seconds": 0.000868827
+              }
+            ]
+          },
+          "output_sha256": "cecb93f33dcdf15ea3bdca6103a4428d5d325237fac38ba1e81116583dd93f58",
+          "passed": true,
+          "cases": [
+            {
+              "index": 0,
+              "n": 3,
+              "b": 1,
+              "max_absolute_error": 0.0,
+              "status": "PASS"
+            },
+            {
+              "index": 1,
+              "n": 7,
+              "b": 1,
+              "max_absolute_error": 0.0,
+              "status": "PASS"
+            },
+            {
+              "index": 2,
+              "n": 16,
+              "b": 4,
+              "max_absolute_error": 0.0,
+              "status": "PASS"
+            },
+            {
+              "index": 3,
+              "n": 31,
+              "b": 1,
+              "max_absolute_error": 0.0,
+              "status": "PASS"
+            }
+          ]
+        },
+        {
+          "requested_mode": "parallel",
+          "performance_eligible": false,
+          "runtime_diagnostics": {
+            "kernel_mode": "demo-local-debug",
+            "application": "scalar",
+            "io_format": "public",
+            "mode": "parallel",
+            "backend": "atomic",
+            "memory_budget_bytes": 4199274906,
+            "requested_memory_bytes": 0,
+            "graph_budget_bytes": 0,
+            "graph_budget_source": "automatic",
+            "memory_budget_source": "automatic",
+            "threads_requested": 0,
+            "batch": 1,
+            "max_tasks": 0,
+            "max_steps": 0,
+            "metadata_bytes": 149,
+            "score_seconds": 0.007734309,
+            "matrix_io_seconds": 6.0317999999999994e-05,
+            "common_finalize_seconds": 0.0005603539999999999,
+            "cpus": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23
+            ],
+            "cases": [
+              {
+                "index": 0,
+                "n": 3,
+                "b": 1,
+                "execution_mode": "parallel",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 4172885966,
+                "case_memory_budget_bytes": 4198154894,
+                "tasks": 12,
+                "phase_tasks": 2,
+                "edges": 12,
+                "workers": 24,
+                "steals": 2,
+                "graph_bytes": 4788,
+                "prepare_seconds": 0.000828837,
+                "execute_seconds": 0.000367605,
+                "compute_seconds": 0.00131798
+              },
+              {
+                "index": 1,
+                "n": 7,
+                "b": 1,
+                "execution_mode": "parallel",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 4172885126,
+                "case_memory_budget_bytes": 4198154254,
+                "tasks": 86,
+                "phase_tasks": 2,
+                "edges": 168,
+                "workers": 24,
+                "steals": 3,
+                "graph_bytes": 44176,
+                "prepare_seconds": 5.2311e-05,
+                "execute_seconds": 0.00033551399999999997,
+                "compute_seconds": 0.000548224
+              },
+              {
+                "index": 2,
+                "n": 16,
+                "b": 4,
+                "execution_mode": "parallel",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 4172880334,
+                "case_memory_budget_bytes": 4198150942,
+                "tasks": 818,
+                "phase_tasks": 2,
+                "edges": 2040,
+                "workers": 24,
+                "steals": 42,
+                "graph_bytes": 433736,
+                "prepare_seconds": 0.000396112,
+                "execute_seconds": 0.000381946,
+                "compute_seconds": 0.001038304
+              },
+              {
+                "index": 3,
+                "n": 31,
+                "b": 1,
+                "execution_mode": "parallel",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 4172854414,
+                "case_memory_budget_bytes": 4198139662,
+                "tasks": 5458,
+                "phase_tasks": 2,
+                "edges": 14880,
+                "workers": 24,
+                "steals": 276,
+                "graph_bytes": 3122168,
+                "prepare_seconds": 0.002728918,
+                "execute_seconds": 0.0009854,
+                "compute_seconds": 0.004269447
+              }
+            ]
+          },
+          "output_sha256": "cecb93f33dcdf15ea3bdca6103a4428d5d325237fac38ba1e81116583dd93f58",
+          "passed": true,
+          "cases": [
+            {
+              "index": 0,
+              "n": 3,
+              "b": 1,
+              "max_absolute_error": 0.0,
+              "status": "PASS"
+            },
+            {
+              "index": 1,
+              "n": 7,
+              "b": 1,
+              "max_absolute_error": 0.0,
+              "status": "PASS"
+            },
+            {
+              "index": 2,
+              "n": 16,
+              "b": 4,
+              "max_absolute_error": 0.0,
+              "status": "PASS"
+            },
+            {
+              "index": 3,
+              "n": 31,
+              "b": 1,
+              "max_absolute_error": 0.0,
+              "status": "PASS"
+            }
+          ]
+        }
+      ],
+      "stages": [
+        {
+          "stage": "compile",
+          "command": [
+            "/usr/bin/python3",
+            "/home/wishapig/hackathon-round2/baseline/compiler/compile.py",
+            "/home/wishapig/hackathon-round2/baseline/examples/naive_cholesky.cpp",
+            "--entry",
+            "naive_cholesky",
+            "--catalog",
+            "/home/wishapig/hackathon-round2/baseline/examples/naive_catalog.json",
+            "-o",
+            "/tmp/dag-functional-1z6qdp87/naive_cholesky.meta"
+          ],
+          "returncode": 0,
+          "stdout": "",
+          "stderr": "compiled /home/wishapig/hackathon-round2/baseline/examples/naive_cholesky.cpp: 149 bytes, operators=scalar_expression\n"
+        },
+        {
+          "stage": "serial",
+          "command": [
+            "/home/wishapig/hackathon-round2/baseline/build-baseline/dag_run",
+            "/tmp/dag-functional-1z6qdp87/naive_cholesky.bin",
+            "/tmp/dag-functional-1z6qdp87/naive_cholesky-serial.out"
+          ],
+          "returncode": 0,
+          "stdout": "",
+          "stderr": "cases=4 score_seconds=0.001678281 matrix_io_seconds=3.4042e-05\n"
+        },
+        {
+          "stage": "serial-public_verifier",
+          "command": [
+            "/home/wishapig/hackathon-round2/baseline/build-baseline/public_verifier",
+            "/tmp/dag-functional-1z6qdp87/naive_cholesky.bin",
+            "/tmp/dag-functional-1z6qdp87/naive_cholesky-serial.out"
+          ],
+          "returncode": 0,
+          "stdout": "case=0 n=3 b=1 scaled_residual=0 status=PASS\ncase=1 n=7 b=1 scaled_residual=0 status=PASS\ncase=2 n=16 b=4 scaled_residual=0 status=PASS\ncase=3 n=31 b=1 scaled_residual=0 status=PASS\n",
+          "stderr": ""
+        },
+        {
+          "stage": "serial-dag_check",
+          "command": [
+            "/home/wishapig/hackathon-round2/baseline/build-baseline/dag_check",
+            "/tmp/dag-functional-1z6qdp87/naive_cholesky.bin",
+            "/tmp/dag-functional-1z6qdp87/naive_cholesky-serial.out"
+          ],
+          "returncode": 0,
+          "stdout": "case=0 n=3 b=1 scaled_residual=0 status=PASS\ncase=1 n=7 b=1 scaled_residual=0 status=PASS\ncase=2 n=16 b=4 scaled_residual=0 status=PASS\ncase=3 n=31 b=1 scaled_residual=0 status=PASS\n",
+          "stderr": ""
+        },
+        {
+          "stage": "parallel",
+          "command": [
+            "/home/wishapig/hackathon-round2/baseline/build-baseline/dag_run",
+            "/tmp/dag-functional-1z6qdp87/naive_cholesky.bin",
+            "/tmp/dag-functional-1z6qdp87/naive_cholesky-parallel.out"
+          ],
+          "returncode": 0,
+          "stdout": "",
+          "stderr": "cases=4 score_seconds=0.007734309 matrix_io_seconds=6.0318e-05\n"
+        },
+        {
+          "stage": "parallel-public_verifier",
+          "command": [
+            "/home/wishapig/hackathon-round2/baseline/build-baseline/public_verifier",
+            "/tmp/dag-functional-1z6qdp87/naive_cholesky.bin",
+            "/tmp/dag-functional-1z6qdp87/naive_cholesky-parallel.out"
+          ],
+          "returncode": 0,
+          "stdout": "case=0 n=3 b=1 scaled_residual=0 status=PASS\ncase=1 n=7 b=1 scaled_residual=0 status=PASS\ncase=2 n=16 b=4 scaled_residual=0 status=PASS\ncase=3 n=31 b=1 scaled_residual=0 status=PASS\n",
+          "stderr": ""
+        },
+        {
+          "stage": "parallel-dag_check",
+          "command": [
+            "/home/wishapig/hackathon-round2/baseline/build-baseline/dag_check",
+            "/tmp/dag-functional-1z6qdp87/naive_cholesky.bin",
+            "/tmp/dag-functional-1z6qdp87/naive_cholesky-parallel.out"
+          ],
+          "returncode": 0,
+          "stdout": "case=0 n=3 b=1 scaled_residual=0 status=PASS\ncase=1 n=7 b=1 scaled_residual=0 status=PASS\ncase=2 n=16 b=4 scaled_residual=0 status=PASS\ncase=3 n=31 b=1 scaled_residual=0 status=PASS\n",
+          "stderr": ""
+        }
+      ],
+      "passed": true,
+      "metadata_bytes": 149,
+      "metadata_sha256": "3eadbeb75ad532b068d7776a295fad53b73ccf321e0fe93ba4b7b69e5ededbb5",
+      "input_sha256": "af1f92ce2aa22b3db7dd95dc03412d1683f69d3413c4ce90b4f1163345d5c484"
+    },
+    {
+      "name": "right_looking_cholesky",
+      "kind": "functional_only",
+      "performance_eligible": false,
+      "source": "/home/wishapig/hackathon-round2/baseline/examples/right_looking_cholesky.cpp",
+      "source_sha256": "cd46063442628d58ff6067618c2f661cd9e107b2c6ad873ff7dd7133ceab5465",
+      "catalog_sha256": "fc5c9df630b4aab8f8e961e7958a147bad416355b042bd349e7fa3786704797a",
+      "runs": [
+        {
+          "requested_mode": "serial",
+          "performance_eligible": false,
+          "runtime_diagnostics": {
+            "kernel_mode": "demo-local-debug",
+            "application": "scalar",
+            "io_format": "public",
+            "mode": "serial",
+            "backend": "atomic",
+            "memory_budget_bytes": 4197710234,
+            "requested_memory_bytes": 0,
+            "graph_budget_bytes": 0,
+            "graph_budget_source": "automatic",
+            "memory_budget_source": "automatic",
+            "threads_requested": 0,
+            "batch": 1,
+            "max_tasks": 0,
+            "max_steps": 0,
+            "metadata_bytes": 143,
+            "score_seconds": 0.001912457,
+            "matrix_io_seconds": 4.8774e-05,
+            "common_finalize_seconds": 0.0005981459999999999,
+            "cpus": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23
+            ],
+            "cases": [
+              {
+                "index": 0,
+                "n": 3,
+                "b": 1,
+                "execution_mode": "serial-stream",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 0,
+                "case_memory_budget_bytes": 4196604108,
+                "tasks": 12,
+                "phase_tasks": 0,
+                "edges": 0,
+                "workers": 1,
+                "steals": 0,
+                "graph_bytes": 0,
+                "prepare_seconds": 0,
+                "execute_seconds": 2.1232e-05,
+                "compute_seconds": 0.000130012
+              },
+              {
+                "index": 1,
+                "n": 7,
+                "b": 1,
+                "execution_mode": "serial-stream",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 0,
+                "case_memory_budget_bytes": 4196603468,
+                "tasks": 86,
+                "phase_tasks": 0,
+                "edges": 0,
+                "workers": 1,
+                "steals": 0,
+                "graph_bytes": 0,
+                "prepare_seconds": 0,
+                "execute_seconds": 2.3067e-05,
+                "compute_seconds": 0.000105034
+              },
+              {
+                "index": 2,
+                "n": 16,
+                "b": 4,
+                "execution_mode": "serial-stream",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 0,
+                "case_memory_budget_bytes": 4196600156,
+                "tasks": 818,
+                "phase_tasks": 0,
+                "edges": 0,
+                "workers": 1,
+                "steals": 0,
+                "graph_bytes": 0,
+                "prepare_seconds": 0,
+                "execute_seconds": 0.000119085,
+                "compute_seconds": 0.000216816
+              },
+              {
+                "index": 3,
+                "n": 31,
+                "b": 1,
+                "execution_mode": "serial-stream",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 0,
+                "case_memory_budget_bytes": 4196588876,
+                "tasks": 5458,
+                "phase_tasks": 0,
+                "edges": 0,
+                "workers": 1,
+                "steals": 0,
+                "graph_bytes": 0,
+                "prepare_seconds": 0,
+                "execute_seconds": 0.000785898,
+                "compute_seconds": 0.000862449
+              }
+            ]
+          },
+          "output_sha256": "cecb93f33dcdf15ea3bdca6103a4428d5d325237fac38ba1e81116583dd93f58",
+          "passed": true,
+          "cases": [
+            {
+              "index": 0,
+              "n": 3,
+              "b": 1,
+              "max_absolute_error": 0.0,
+              "status": "PASS"
+            },
+            {
+              "index": 1,
+              "n": 7,
+              "b": 1,
+              "max_absolute_error": 0.0,
+              "status": "PASS"
+            },
+            {
+              "index": 2,
+              "n": 16,
+              "b": 4,
+              "max_absolute_error": 0.0,
+              "status": "PASS"
+            },
+            {
+              "index": 3,
+              "n": 31,
+              "b": 1,
+              "max_absolute_error": 0.0,
+              "status": "PASS"
+            }
+          ]
+        },
+        {
+          "requested_mode": "parallel",
+          "performance_eligible": false,
+          "runtime_diagnostics": {
+            "kernel_mode": "demo-local-debug",
+            "application": "scalar",
+            "io_format": "public",
+            "mode": "parallel",
+            "backend": "atomic",
+            "memory_budget_bytes": 4197376000,
+            "requested_memory_bytes": 0,
+            "graph_budget_bytes": 0,
+            "graph_budget_source": "automatic",
+            "memory_budget_source": "automatic",
+            "threads_requested": 0,
+            "batch": 1,
+            "max_tasks": 0,
+            "max_steps": 0,
+            "metadata_bytes": 143,
+            "score_seconds": 0.007318461,
+            "matrix_io_seconds": 7.773800000000002e-05,
+            "common_finalize_seconds": 0.0006812319999999986,
+            "cpus": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23
+            ],
+            "cases": [
+              {
+                "index": 0,
+                "n": 3,
+                "b": 1,
+                "execution_mode": "parallel",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 4171000946,
+                "case_memory_budget_bytes": 4196269874,
+                "tasks": 12,
+                "phase_tasks": 2,
+                "edges": 12,
+                "workers": 24,
+                "steals": 2,
+                "graph_bytes": 5028,
+                "prepare_seconds": 0.000824306,
+                "execute_seconds": 0.000287028,
+                "compute_seconds": 0.0012226350000000001
+              },
+              {
+                "index": 1,
+                "n": 7,
+                "b": 1,
+                "execution_mode": "parallel",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 4171000106,
+                "case_memory_budget_bytes": 4196269234,
+                "tasks": 86,
+                "phase_tasks": 2,
+                "edges": 168,
+                "workers": 24,
+                "steals": 8,
+                "graph_bytes": 45856,
+                "prepare_seconds": 4.9626e-05,
+                "execute_seconds": 0.000291208,
+                "compute_seconds": 0.000497419
+              },
+              {
+                "index": 2,
+                "n": 16,
+                "b": 4,
+                "execution_mode": "parallel",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 4170995314,
+                "case_memory_budget_bytes": 4196265922,
+                "tasks": 818,
+                "phase_tasks": 2,
+                "edges": 2040,
+                "workers": 24,
+                "steals": 49,
+                "graph_bytes": 443336,
+                "prepare_seconds": 0.000374264,
+                "execute_seconds": 0.000349977,
+                "compute_seconds": 0.000912124
+              },
+              {
+                "index": 3,
+                "n": 31,
+                "b": 1,
+                "execution_mode": "parallel",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 4170969394,
+                "case_memory_budget_bytes": 4196254642,
+                "tasks": 5458,
+                "phase_tasks": 2,
+                "edges": 14880,
+                "workers": 24,
+                "steals": 289,
+                "graph_bytes": 3159368,
+                "prepare_seconds": 0.0026189,
+                "execute_seconds": 0.000736035,
+                "compute_seconds": 0.004005051000000001
+              }
+            ]
+          },
+          "output_sha256": "cecb93f33dcdf15ea3bdca6103a4428d5d325237fac38ba1e81116583dd93f58",
+          "passed": true,
+          "cases": [
+            {
+              "index": 0,
+              "n": 3,
+              "b": 1,
+              "max_absolute_error": 0.0,
+              "status": "PASS"
+            },
+            {
+              "index": 1,
+              "n": 7,
+              "b": 1,
+              "max_absolute_error": 0.0,
+              "status": "PASS"
+            },
+            {
+              "index": 2,
+              "n": 16,
+              "b": 4,
+              "max_absolute_error": 0.0,
+              "status": "PASS"
+            },
+            {
+              "index": 3,
+              "n": 31,
+              "b": 1,
+              "max_absolute_error": 0.0,
+              "status": "PASS"
+            }
+          ]
+        }
+      ],
+      "stages": [
+        {
+          "stage": "compile",
+          "command": [
+            "/usr/bin/python3",
+            "/home/wishapig/hackathon-round2/baseline/compiler/compile.py",
+            "/home/wishapig/hackathon-round2/baseline/examples/right_looking_cholesky.cpp",
+            "--entry",
+            "right_looking_cholesky",
+            "--catalog",
+            "/home/wishapig/hackathon-round2/baseline/examples/naive_catalog.json",
+            "-o",
+            "/tmp/dag-functional-1z6qdp87/right_looking_cholesky.meta"
+          ],
+          "returncode": 0,
+          "stdout": "",
+          "stderr": "compiled /home/wishapig/hackathon-round2/baseline/examples/right_looking_cholesky.cpp: 143 bytes, operators=scalar_expression\n"
+        },
+        {
+          "stage": "serial",
+          "command": [
+            "/home/wishapig/hackathon-round2/baseline/build-baseline/dag_run",
+            "/tmp/dag-functional-1z6qdp87/right_looking_cholesky.bin",
+            "/tmp/dag-functional-1z6qdp87/right_looking_cholesky-serial.out"
+          ],
+          "returncode": 0,
+          "stdout": "",
+          "stderr": "cases=4 score_seconds=0.001912457 matrix_io_seconds=4.8774e-05\n"
+        },
+        {
+          "stage": "serial-public_verifier",
+          "command": [
+            "/home/wishapig/hackathon-round2/baseline/build-baseline/public_verifier",
+            "/tmp/dag-functional-1z6qdp87/right_looking_cholesky.bin",
+            "/tmp/dag-functional-1z6qdp87/right_looking_cholesky-serial.out"
+          ],
+          "returncode": 0,
+          "stdout": "case=0 n=3 b=1 scaled_residual=0 status=PASS\ncase=1 n=7 b=1 scaled_residual=0 status=PASS\ncase=2 n=16 b=4 scaled_residual=0 status=PASS\ncase=3 n=31 b=1 scaled_residual=0 status=PASS\n",
+          "stderr": ""
+        },
+        {
+          "stage": "serial-dag_check",
+          "command": [
+            "/home/wishapig/hackathon-round2/baseline/build-baseline/dag_check",
+            "/tmp/dag-functional-1z6qdp87/right_looking_cholesky.bin",
+            "/tmp/dag-functional-1z6qdp87/right_looking_cholesky-serial.out"
+          ],
+          "returncode": 0,
+          "stdout": "case=0 n=3 b=1 scaled_residual=0 status=PASS\ncase=1 n=7 b=1 scaled_residual=0 status=PASS\ncase=2 n=16 b=4 scaled_residual=0 status=PASS\ncase=3 n=31 b=1 scaled_residual=0 status=PASS\n",
+          "stderr": ""
+        },
+        {
+          "stage": "parallel",
+          "command": [
+            "/home/wishapig/hackathon-round2/baseline/build-baseline/dag_run",
+            "/tmp/dag-functional-1z6qdp87/right_looking_cholesky.bin",
+            "/tmp/dag-functional-1z6qdp87/right_looking_cholesky-parallel.out"
+          ],
+          "returncode": 0,
+          "stdout": "",
+          "stderr": "cases=4 score_seconds=0.007318461 matrix_io_seconds=7.7738e-05\n"
+        },
+        {
+          "stage": "parallel-public_verifier",
+          "command": [
+            "/home/wishapig/hackathon-round2/baseline/build-baseline/public_verifier",
+            "/tmp/dag-functional-1z6qdp87/right_looking_cholesky.bin",
+            "/tmp/dag-functional-1z6qdp87/right_looking_cholesky-parallel.out"
+          ],
+          "returncode": 0,
+          "stdout": "case=0 n=3 b=1 scaled_residual=0 status=PASS\ncase=1 n=7 b=1 scaled_residual=0 status=PASS\ncase=2 n=16 b=4 scaled_residual=0 status=PASS\ncase=3 n=31 b=1 scaled_residual=0 status=PASS\n",
+          "stderr": ""
+        },
+        {
+          "stage": "parallel-dag_check",
+          "command": [
+            "/home/wishapig/hackathon-round2/baseline/build-baseline/dag_check",
+            "/tmp/dag-functional-1z6qdp87/right_looking_cholesky.bin",
+            "/tmp/dag-functional-1z6qdp87/right_looking_cholesky-parallel.out"
+          ],
+          "returncode": 0,
+          "stdout": "case=0 n=3 b=1 scaled_residual=0 status=PASS\ncase=1 n=7 b=1 scaled_residual=0 status=PASS\ncase=2 n=16 b=4 scaled_residual=0 status=PASS\ncase=3 n=31 b=1 scaled_residual=0 status=PASS\n",
+          "stderr": ""
+        }
+      ],
+      "passed": true,
+      "metadata_bytes": 143,
+      "metadata_sha256": "1d444b58e4d24bbc43a3956e2a4e19ce5e649993d26d7389b085680fa5a7f79f",
+      "input_sha256": "af1f92ce2aa22b3db7dd95dc03412d1683f69d3413c4ce90b4f1163345d5c484"
+    },
+    {
+      "name": "scalar_wavefront",
+      "kind": "functional_only",
+      "performance_eligible": false,
+      "source": "/home/wishapig/hackathon-round2/baseline/examples/scalar_wavefront.cpp",
+      "source_sha256": "93eb0e62d96a9548ece47e7a754449f11bef0048f565cce8d0b28783111ec249",
+      "catalog_sha256": "fc5c9df630b4aab8f8e961e7958a147bad416355b042bd349e7fa3786704797a",
+      "runs": [
+        {
+          "requested_mode": "serial",
+          "performance_eligible": false,
+          "runtime_diagnostics": {
+            "kernel_mode": "demo-local-debug",
+            "application": "scalar",
+            "io_format": "public",
+            "mode": "serial",
+            "backend": "atomic",
+            "memory_budget_bytes": 4197356340,
+            "requested_memory_bytes": 0,
+            "graph_budget_bytes": 0,
+            "graph_budget_source": "automatic",
+            "memory_budget_source": "automatic",
+            "threads_requested": 0,
+            "batch": 1,
+            "max_tasks": 0,
+            "max_steps": 0,
+            "metadata_bytes": 118,
+            "score_seconds": 0.000969634,
+            "matrix_io_seconds": 3.866499999999999e-05,
+            "common_finalize_seconds": 0.00037858200000000014,
+            "cpus": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23
+            ],
+            "cases": [
+              {
+                "index": 0,
+                "n": 3,
+                "b": 1,
+                "execution_mode": "serial-stream",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 0,
+                "case_memory_budget_bytes": 4196276546,
+                "tasks": 5,
+                "phase_tasks": 0,
+                "edges": 0,
+                "workers": 1,
+                "steals": 0,
+                "graph_bytes": 0,
+                "prepare_seconds": 0,
+                "execute_seconds": 1.1047e-05,
+                "compute_seconds": 0.000109198
+              },
+              {
+                "index": 1,
+                "n": 7,
+                "b": 1,
+                "execution_mode": "serial-stream",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 0,
+                "case_memory_budget_bytes": 4196275906,
+                "tasks": 37,
+                "phase_tasks": 0,
+                "edges": 0,
+                "workers": 1,
+                "steals": 0,
+                "graph_bytes": 0,
+                "prepare_seconds": 0,
+                "execute_seconds": 1.1609e-05,
+                "compute_seconds": 9.8023e-05
+              },
+              {
+                "index": 2,
+                "n": 16,
+                "b": 4,
+                "execution_mode": "serial-stream",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 0,
+                "case_memory_budget_bytes": 4196272594,
+                "tasks": 226,
+                "phase_tasks": 0,
+                "edges": 0,
+                "workers": 1,
+                "steals": 0,
+                "graph_bytes": 0,
+                "prepare_seconds": 0,
+                "execute_seconds": 4.728e-05,
+                "compute_seconds": 0.000127912
+              },
+              {
+                "index": 3,
+                "n": 31,
+                "b": 1,
+                "execution_mode": "serial-stream",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 0,
+                "case_memory_budget_bytes": 4196261314,
+                "tasks": 901,
+                "phase_tasks": 0,
+                "edges": 0,
+                "workers": 1,
+                "steals": 0,
+                "graph_bytes": 0,
+                "prepare_seconds": 0,
+                "execute_seconds": 0.000176958,
+                "compute_seconds": 0.00025591899999999996
+              }
+            ]
+          },
+          "output_sha256": "a8ae0b1eddc07d8b8f159fe8065865c45e748012a67ae82c9da0c3a6081af52b",
+          "passed": true,
+          "cases": [
+            {
+              "index": 0,
+              "n": 3,
+              "b": 1,
+              "max_absolute_error": 0.0,
+              "status": "PASS"
+            },
+            {
+              "index": 1,
+              "n": 7,
+              "b": 1,
+              "max_absolute_error": 0.0,
+              "status": "PASS"
+            },
+            {
+              "index": 2,
+              "n": 16,
+              "b": 4,
+              "max_absolute_error": 0.0,
+              "status": "PASS"
+            },
+            {
+              "index": 3,
+              "n": 31,
+              "b": 1,
+              "max_absolute_error": 1.1102230246251565e-16,
+              "status": "PASS"
+            }
+          ]
+        },
+        {
+          "requested_mode": "parallel",
+          "performance_eligible": false,
+          "runtime_diagnostics": {
+            "kernel_mode": "demo-local-debug",
+            "application": "scalar",
+            "io_format": "public",
+            "mode": "parallel",
+            "backend": "atomic",
+            "memory_budget_bytes": 4197149901,
+            "requested_memory_bytes": 0,
+            "graph_budget_bytes": 0,
+            "graph_budget_source": "automatic",
+            "memory_budget_source": "automatic",
+            "threads_requested": 0,
+            "batch": 1,
+            "max_tasks": 0,
+            "max_steps": 0,
+            "metadata_bytes": 118,
+            "score_seconds": 0.0049137289999999995,
+            "matrix_io_seconds": 8.7387e-05,
+            "common_finalize_seconds": 0.0008384409999999997,
+            "cpus": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23
+            ],
+            "cases": [
+              {
+                "index": 0,
+                "n": 3,
+                "b": 1,
+                "execution_mode": "parallel",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 4170798875,
+                "case_memory_budget_bytes": 4196070107,
+                "tasks": 5,
+                "phase_tasks": 1,
+                "edges": 4,
+                "workers": 24,
+                "steals": 1,
+                "graph_bytes": 2928,
+                "prepare_seconds": 0.000958617,
+                "execute_seconds": 0.000398632,
+                "compute_seconds": 0.0014719400000000001
+              },
+              {
+                "index": 1,
+                "n": 7,
+                "b": 1,
+                "execution_mode": "parallel",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 4170798155,
+                "case_memory_budget_bytes": 4196069467,
+                "tasks": 37,
+                "phase_tasks": 1,
+                "edges": 60,
+                "workers": 24,
+                "steals": 6,
+                "graph_bytes": 25552,
+                "prepare_seconds": 2.9523e-05,
+                "execute_seconds": 0.000375826,
+                "compute_seconds": 0.0006322070000000001
+              },
+              {
+                "index": 2,
+                "n": 16,
+                "b": 4,
+                "execution_mode": "parallel",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 4170794203,
+                "case_memory_budget_bytes": 4196066155,
+                "tasks": 226,
+                "phase_tasks": 1,
+                "edges": 420,
+                "workers": 24,
+                "steals": 8,
+                "graph_bytes": 144862,
+                "prepare_seconds": 0.000136672,
+                "execute_seconds": 0.000373842,
+                "compute_seconds": 0.000738013
+              },
+              {
+                "index": 3,
+                "n": 31,
+                "b": 1,
+                "execution_mode": "parallel",
+                "resource_limited": false,
+                "resource_reason": "",
+                "resource_stage": "",
+                "effective_graph_budget_bytes": 4170779143,
+                "case_memory_budget_bytes": 4196054875,
+                "tasks": 901,
+                "phase_tasks": 1,
+                "edges": 1740,
+                "workers": 24,
+                "steals": 38,
+                "graph_bytes": 579664,
+                "prepare_seconds": 0.000500761,
+                "execute_seconds": 0.00049362,
+                "compute_seconds": 0.001233128
+              }
+            ]
+          },
+          "output_sha256": "a8ae0b1eddc07d8b8f159fe8065865c45e748012a67ae82c9da0c3a6081af52b",
+          "passed": true,
+          "cases": [
+            {
+              "index": 0,
+              "n": 3,
+              "b": 1,
+              "max_absolute_error": 0.0,
+              "status": "PASS"
+            },
+            {
+              "index": 1,
+              "n": 7,
+              "b": 1,
+              "max_absolute_error": 0.0,
+              "status": "PASS"
+            },
+            {
+              "index": 2,
+              "n": 16,
+              "b": 4,
+              "max_absolute_error": 0.0,
+              "status": "PASS"
+            },
+            {
+              "index": 3,
+              "n": 31,
+              "b": 1,
+              "max_absolute_error": 1.1102230246251565e-16,
+              "status": "PASS"
+            }
+          ]
+        }
+      ],
+      "stages": [
+        {
+          "stage": "compile",
+          "command": [
+            "/usr/bin/python3",
+            "/home/wishapig/hackathon-round2/baseline/compiler/compile.py",
+            "/home/wishapig/hackathon-round2/baseline/examples/scalar_wavefront.cpp",
+            "--entry",
+            "scalar_wavefront",
+            "--catalog",
+            "/home/wishapig/hackathon-round2/baseline/examples/naive_catalog.json",
+            "-o",
+            "/tmp/dag-functional-1z6qdp87/scalar_wavefront.meta"
+          ],
+          "returncode": 0,
+          "stdout": "",
+          "stderr": "compiled /home/wishapig/hackathon-round2/baseline/examples/scalar_wavefront.cpp: 118 bytes, operators=scalar_expression\n"
+        },
+        {
+          "stage": "serial",
+          "command": [
+            "/home/wishapig/hackathon-round2/baseline/build-baseline/dag_run",
+            "/tmp/dag-functional-1z6qdp87/scalar_wavefront.bin",
+            "/tmp/dag-functional-1z6qdp87/scalar_wavefront-serial.out"
+          ],
+          "returncode": 0,
+          "stdout": "",
+          "stderr": "cases=4 score_seconds=0.000969634 matrix_io_seconds=3.8665e-05\n"
+        },
+        {
+          "stage": "parallel",
+          "command": [
+            "/home/wishapig/hackathon-round2/baseline/build-baseline/dag_run",
+            "/tmp/dag-functional-1z6qdp87/scalar_wavefront.bin",
+            "/tmp/dag-functional-1z6qdp87/scalar_wavefront-parallel.out"
+          ],
+          "returncode": 0,
+          "stdout": "",
+          "stderr": "cases=4 score_seconds=0.004913729 matrix_io_seconds=8.7387e-05\n"
+        }
+      ],
+      "passed": true,
+      "metadata_bytes": 118,
+      "metadata_sha256": "ac6ff8fc0e7eebd9dcf902be5ed83c1d9b6bf9541fe5038470c77460de040a0d",
+      "input_sha256": "8d349de9bf5b6e433bbdda453dce4c128a8c06e81c86be2a3a1975725a2871bf"
+    }
+  ],
+  "passed": true,
+  "effective_controls": {
+    "DAG_THREADS": "0",
+    "DAG_MODE": "auto",
+    "DAG_BATCH": "1",
+    "DAG_BACKEND": "atomic",
+    "DAG_IO_FORMAT": "public",
+    "DAG_APPLICATION": "scalar",
+    "DAG_CHECK_THREADS": "4",
+    "SPD_GENERATOR_THREADS": "8",
+    "VERIFIER_THREADS": "8"
+  },
+  "program_sha256": "9eda44ad81a147fb40b4bebbf4c181f0dc67157730e87b63aefe77e6ca86e5a0",
+  "compiler_sha256": "a8d58d5fd7be0d9fc6443152bbf69c02b17d1b9ffbdca5ec59ff7a049377270f",
+  "checker_sha256": {
+    "public_verifier": "d6897d2b96345935d18f83bd9381f657576e0af578cf69ed5375ae1172a22a2a",
+    "dag_check": "862d527e934f7379313c060c6c0a3d21cb6ca10ebd1193460b6fe3a3f1927be0"
+  }
+}
