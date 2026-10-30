@@ -939,9 +939,176 @@ def estimate_schedule(argv):
     print(json.dumps({'status': report['status'], 'task_count': report.get('task_count'), 'edge_count': report.get('edge_count'), 'report': str(a.report)}))
     return 0 if report['status'] == 'ok' else 1
 
+def compare_demo(argv):
+    """One run per input and executable, no warmup; demo native timer is narrower."""
+    import shutil
+    root = Path(__file__).resolve().parents[1]
+    parser = argparse.ArgumentParser(description=compare_demo.__doc__)
+    parser.add_argument('--build-dir', type=Path, default=root/'build')
+    parser.add_argument('--output-dir', type=Path, default=root/'artifacts/benchmark')
+    parser.add_argument('--datasets', nargs='+', choices=['public20', 'n4096-b64', 'n8192-b32',
+                         'n8192-b256', 'n4000-b1'],
+                         default=['public20', 'n4096-b64', 'n8192-b32', 'n8192-b256', 'n4000-b1'])
+    parser.add_argument('--timeout', type=float, default=1200)
+    parser.add_argument('--jobs', type=int, default=8)
+    add_controls(parser, public_only=True)
+    args = parser.parse_args(argv)
+    env, policy = execution_environment(args, parser)
+    if args.jobs < 1 or not (0 < args.timeout < float('inf')):
+        parser.error('invalid jobs/timeout')
+    if len(args.datasets) != len(set(args.datasets)):
+        parser.error('duplicate dataset')
+    if any(k in env for k in ('DAG_BLOCK_SIZE', 'DAG_BLOCK_SIZES')):
+        parser.error('public input contains its own block sizes')
+    build, dest = args.build_dir.resolve(), args.output_dir.resolve()
+    dest.mkdir(parents=True, exist_ok=True)
+    report_path = dest/'comparison.json'
+    report = {'command': 'compare-demo', 'repeats': 1, 'warmups': 0, 'passed': False,
+              'requirements': ['R-06', 'R-12', 'R-14', 'R-15', 'R-17', 'R-18', 'R-19',
+                               'R-21', 'R-24', 'R-25', 'R-26'],
+              'environment_policy': policy, 'host': platform.platform(), 'datasets': [],
+              'timing_scope': {'baseline_serial': 'Demo original block_cholesky call only: includes copy/operators/upper zero; excludes buffer allocation, initialization, destruction and I/O.',
+                               'dag_run': 'Complete runtime calculation: excludes only matrix file I/O; validation is external.',
+                               'process_wall_seconds': 'Whole executable including matrix I/O; validation excluded.',
+                               'ratio': 'Demo native timer / runtime complete timer; unequal boundaries, not a formal same-scope speedup.'}}
+    def save():
+        report_path.write_text(json.dumps(report, indent=2) + '\n')
+    def stage(name, command):
+        print('['+name+']', flush=True)
+        run = subprocess.run([str(x) for x in command], cwd=root, env=env,
+                             capture_output=True, text=True, timeout=args.timeout)
+        report.setdefault('stages', []).append({'name': name, 'command': [str(x) for x in command],
+                                               'returncode': run.returncode, 'stdout': run.stdout,
+                                               'stderr': run.stderr})
+        save()
+        if run.returncode:
+            raise RuntimeError(name+' failed: '+run.stderr)
+    try:
+        stage('configure', ['cmake', '-S', root, '-B', build, '-DCMAKE_BUILD_TYPE=Release'])
+        stage('build', ['cmake', '--build', build, '--parallel', args.jobs, '--target',
+                        'dag_run', 'baseline_serial', 'spd_generator', 'public_verifier', 'dag_check'])
+        metadata = build/'block_cholesky.meta'
+        report.update(metadata_bytes=metadata.stat().st_size, metadata=str(metadata),
+                      metadata_sha256=digest(metadata), kernel_library=kernel_identity(build/'dag_run'))
+        report['program_sha256'] = {name: digest(build/name) for name in ('dag_run', 'baseline_serial')}
+        env['DAG_METADATA'] = str(metadata)
+        for key in ('SPD_GENERATOR_THREADS', 'VERIFIER_THREADS', 'DAG_CHECK_THREADS'):
+            env.setdefault(key, str(min(8, len(os.sched_getaffinity(0)))))
+        # Choose an actual allowed NUMA node using the same Linux sysfs topology
+        # as the runtime; affinity applies to generation, both programs and checks.
+        allowed = set(os.sched_getaffinity(0))
+        nodes = []
+        for path in sorted(Path('/sys/devices/system/node').glob('node[0-9]*/cpulist')):
+            cpus = set()
+            for part in path.read_text().strip().split(','):
+                bounds = list(map(int, part.split('-')))
+                cpus.update(range(bounds[0], bounds[-1]+1))
+            if cpus & allowed:
+                nodes.append(cpus & allowed)
+        if nodes:
+            os.sched_setaffinity(0, max(nodes, key=len))
+        report['cpus'] = sorted(os.sched_getaffinity(0))
+        report['effective_controls'] = {k: v for k, v in env.items() if is_control(k)}
+        for dataset in args.datasets:
+            inp = dest/(dataset+'.bin')
+            if dataset == 'public20':
+                stage('generate-'+dataset, [build/'spd_generator', inp, '--spec',
+                                            root/'vendor/public20/cases/preliminary_public_20.txt'])
+            else:
+                n, b = map(int, dataset[1:].split('-b'))
+                other = dest/('n8192-b32.bin' if b == 256 else 'n8192-b256.bin')
+                if n == 8192 and other.exists():
+                    shutil.copyfile(other, inp)
+                    with inp.open('r+b') as f:
+                        f.seek(8)
+                        f.write(struct.pack('=I', b))
+                else:
+                    stage('generate-'+dataset, [build/'spd_generator', inp, n, b, 20261030])
+            cases = input_cases(inp, 'public')
+            row = {'dataset': dataset, 'input': str(inp), 'input_sha256': digest(inp),
+                   'cases': cases, 'runs': [], 'comparison_eligible': False}
+            report['datasets'].append(row)
+            for program in ('baseline_serial', 'dag_run'):
+                sample = {'program': program, 'returncode': None, 'correctness_passed': False}
+                row['runs'].append(sample)
+                print('['+dataset+' '+program+' single run]', flush=True)
+                with tempfile.TemporaryDirectory(prefix='dag-demo-') as temp:
+                    temp = Path(temp)
+                    out, timing, stats = temp/'output.bin', temp/'time.txt', temp/'stats.json'
+                    child = env | {'COMPILER2026_TIMING_FILE': str(timing), 'DAG_STATS_FILE': str(stats)}
+                    start = time.perf_counter()
+                    try:
+                        run = subprocess.run([str(build/program), str(inp), str(out)], env=child,
+                                             capture_output=True, text=True, timeout=args.timeout)
+                        sample.update(returncode=run.returncode, stdout=run.stdout, stderr=run.stderr,
+                                      process_wall_seconds=time.perf_counter()-start)
+                        if timing.exists():
+                            seconds = float(timing.read_text())
+                            if not (0 <= seconds < float('inf')):
+                                raise ValueError('invalid native timer')
+                            sample['native_timer_seconds'] = seconds
+                        if stats.exists():
+                            sample['runtime_stats'] = json.loads(stats.read_text())
+                        save()
+                        if run.returncode:
+                            raise RuntimeError('program exited '+str(run.returncode))
+                        if 'native_timer_seconds' not in sample:
+                            raise ValueError('missing native timer')
+                        sample['checks'] = []
+                        for checker in ('public_verifier', 'dag_check'):
+                            checked = subprocess.run([str(build/checker), str(inp), str(out)], env=child,
+                                                     capture_output=True, text=True, timeout=args.timeout)
+                            lines = checked.stdout.splitlines()
+                            valid = checked.returncode == 0 and len(lines) == len(cases) and all(
+                                line.startswith(f"case={c['index']} n={c['n']} b={c['b']} scaled_residual=")
+                                and line.endswith('status=PASS') for c, line in zip(cases, lines))
+                            sample['checks'].append({'checker': checker, 'returncode': checked.returncode,
+                                                      'stdout': checked.stdout, 'stderr': checked.stderr,
+                                                      'passed': valid})
+                        sample['validation'] = {'returncode': 0 if all(c['passed'] for c in sample['checks']) else 1}
+                        sample['correctness_passed'] = sample['validation']['returncode'] == 0
+                    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
+                        sample['error'] = str(error)
+                        sample.setdefault('process_wall_seconds', time.perf_counter()-start)
+                    if program == 'dag_run':
+                        try:
+                            classify_sample(sample, cases)
+                        except (ValueError, TypeError, KeyError) as error:
+                            sample.update(error=str(error), correctness_passed=False, full_batch_eligible=False)
+                    else:
+                        sample['full_batch_eligible'] = sample['correctness_passed'] and not sample.get('error')
+                    save()
+                    print(dataset, program, sample.get('native_timer_seconds'),
+                          'PASS' if sample['correctness_passed'] else 'FAIL', flush=True)
+            demo, runtime = row['runs']
+            row['comparison_eligible'] = all(s.get('full_batch_eligible') for s in row['runs'])
+            if row['comparison_eligible']:
+                row['native_timer_ratio_demo_over_runtime'] = demo['native_timer_seconds']/runtime['native_timer_seconds']
+            save()
+        report['correctness_passed'] = all(s['correctness_passed'] for d in report['datasets'] for s in d['runs'])
+        report['coverage'] = {'eligible_datasets': sum(d['comparison_eligible'] for d in report['datasets']),
+                              'total_datasets': len(args.datasets),
+                              'excluded_datasets': [d['dataset'] for d in report['datasets'] if not d['comparison_eligible']]}
+        report['passed'] = report['correctness_passed'] and not report['coverage']['excluded_datasets']
+    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
+        report['error'] = str(error)
+    finally:
+        if 'allowed' in locals():
+            os.sched_setaffinity(0, allowed)
+        save()
+    print('Report: '+str(report_path), flush=True)
+    print(json.dumps({'passed': report['passed'], 'metadata_bytes': report.get('metadata_bytes'),
+                      'coverage': report.get('coverage')}), flush=True)
+    return int(not report['passed'])
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == 'visual-demo':
+        from visual_demo import main as visual_demo_main
+        return visual_demo_main(sys.argv[2:])
     commands = {'accept-public20': accept_public20, 'compare-reports': compare_reports, 'submit': submit,
-                'verify-algorithms': verify_algorithms, 'estimate-schedule': estimate_schedule}
+                'verify-algorithms': verify_algorithms, 'estimate-schedule': estimate_schedule,
+                'compare-demo': compare_demo}
     if len(sys.argv) > 1 and sys.argv[1] in commands:
         return commands[sys.argv[1]](sys.argv[2:])
     p = argparse.ArgumentParser(description=__doc__)

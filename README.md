@@ -1,167 +1,198 @@
-# Source-driven DAG runtime
+# 从源码生成并行任务的 Cholesky 运行时
 
-每次工作先读 [REQUIREMENTS.md](REQUIREMENTS.md)，这是唯一需求规范。本文仅说明当前程序用法。
+完整的讲课式说明见 [架构设计文档](docs/architecture.md)，按源码、Metadata、任务图和并行执行的顺序展开。
 
-**第二轮睡前推荐：round2/baseline（9690887），默认Metadata141字节。** 新实验没有稳定全程收益，保持P007数值实现并保留已提交R-27/R-28功能工具。当前生产源码与此完整基线一致；构建、正式库重链接、验收和干净启动见 [SUBMISSION.md](SUBMISSION.md) 顶部，旧候选为历史记录。
+这个项目做两件事：分析算法源码，生成描述计算过程的 **Metadata**；读取 Metadata 和输入矩阵，把可以同时执行的算子交给多个线程。
 
-**比赛推荐与准确提交命令见 [SUBMISSION.md](SUBMISSION.md)。** 原交接版本为P005（257字节Metadata）；R-28后续实现P007改为141字节，变更和新证据见下节。默认资源自适应，不携带本机线程/内存覆盖。正式库和目标机未验证。
+目前主要处理分块 Cholesky 分解：输入正定矩阵 A，输出下三角矩阵 L，使 `A = L × Lᵀ`。矩阵大小 n 和分块大小 b 由输入文件给出，程序调用提供的 `cholesky`、`trsm`、`madd` 算子完成计算。
 
-Python 编译器将支持的源码子集与算子契约转换为 Metadata；C++ runtime 按实际参数构图并调用公共 cholesky/trsm/madd。按后续回复，当前验收使用 public20 的 `count + [n, b, matrix]` 协议；原题面格式另有显式兼容模式。
+优化的重点是少做任务展开、依赖分析和调度中的重复工作。Metadata 保存循环、条件、调用和读写区域等信息；运行时再代入 n、b，因此同一份 Metadata 可以处理不同大小的矩阵。
 
-## 一条命令完成本地验收
+## 先跑起来
 
-在仓库根目录运行：
+需要 Linux、支持 C++17 的编译器、Clang、CMake 3.16+、Python 3.9+ 和 zlib 开发库。Ubuntu 上可以这样安装：
+
+```bash
+sudo apt install build-essential clang cmake python3 zlib1g-dev
+```
+
+在仓库根目录执行：
 
 ```bash
 python3 tools/benchmark.py accept-public20
 ```
 
-命令依次配置/构建 Release、编译原包生成器和 verifier、生成20条输入、以两个位置参数运行 dag_run，然后执行原包 verifier。必须退出码为 0、case 0～19 全部 `status=PASS`，并与规格中的 n/b 匹配；随后执行保留的加强数值检查。任何一步失败，命令非零退出。
+这条命令会构建程序、生成公开的 20 个测试矩阵、运行分解并校验结果，最后验证另外三种算法示例。成功时会看到：
 
-成功时显示 `PUBLIC20 ACCEPTANCE: PASS (20/20; supplied verifier exit=0)`。每次结果保存在新建的 `artifacts/acceptance/public20-*/`：包含输入、输出、各阶段日志、完整计算耗时、CPU 集和 `acceptance.json`，不会误用旧输出。
+```text
+PUBLIC20 ACCEPTANCE: PASS (20/20; supplied verifier exit=0)
+```
 
-默认让 runtime 在实际允许的一个 NUMA 节点内自行选择线程；可用 `--threads 16` 限制线程数。`--build-dir build-judge --official-library /absolute/path/to/judge_kernels.a` 可验收指定库构建。默认库仍是 demo，公开20条通过代表本地接口和正确性验收，不代表全部隐藏用例或目标机成绩。此命令与下方重复性能测量共用同一个常驻端到端入口。
+本次输入、输出、日志和 `acceptance.json` 会保存在新建的 `artifacts/acceptance/public20-*/` 目录里。默认使用仓库自带的 demo 算子库；要使用比赛正式库，见后面的构建说明。
 
-## 构建与运行
+## 小矩阵可视化演示
 
-依赖 Linux、CMake 3.16+、C++17、Python 3.9+、pthreads 和 zlib >=1.2.9（Ubuntu 包 zlib1g-dev）。默认链接 demo 内核。
+```bash
+python3 tools/benchmark.py visual-demo
+```
+
+命令启动本地网页服务。浏览器打开 **http://127.0.0.1:8765**，填写 n、b、线程数和种子，点击 **“生成并运行”**。默认 `n=6、b=2、2个线程`；页面依次显示生成进度、输入矩阵 A、Metadata、输出 L、重建误差与下载链接。计算和两种校验由真实程序执行，不是在浏览器里模拟结果。终端保持运行，Ctrl+C 停止服务；无需 npm 或前端依赖。
+
+页面可查看 A、L、重建误差、Metadata，以及离线导出的真实任务依赖图；可点击节点查看读写块、逐步播放依赖放行。播放是依赖示意，不是真实线程时间线。本次显式使用 graph 路径并关闭循环合并，便于观察；演示耗时不作为性能调优结论。
+
+每次运行在 `artifacts/visual-demo/n*-b*-*/` 独立保留 `input.bin`、`block_cholesky.meta`、`result.out`、`result.csv`、`metadata.json`、结果网页和日志。页面限制 n≤16、块行数≤4；`--port 8766` 更改服务端口，`--clang /path/to/clang++` 指定离线分析工具。只生成离线结果页可加 `--export --n 9 --b 3`。可视化导出器仅在此命令显式构建，不链接到计算程序，不增加默认计时开销或计分 Metadata 内容。
+
+## 运行自己的输入
+
+如果只想构建程序：
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j 8
-mkdir -p artifacts
-build/spd_generator artifacts/public20.bin \
-  --spec vendor/public20/cases/preliminary_public_20.txt
-DAG_METADATA="$PWD/build/block_cholesky.meta" DAG_THREADS=0 DAG_MODE=auto \
-  build/dag_run artifacts/public20.bin artifacts/result.out
+cmake --build build --parallel 4
 ```
 
-程序接收输入、输出两个路径。`DAG_THREADS=0` 使用实际允许的单 NUMA CPU 集；`DAG_MODE` 支持 `auto|parallel|serial`，`DAG_BACKEND` 支持 `atomic|owner`。
+构建会生成 `build/dag_run` 和 `build/block_cholesky.meta`。其中 Clang 用于分析算子源码的读写行为，Python 工具把算法和这些信息编成 Metadata。
 
-内存默认根据单 NUMA 可用估算、进程/cgroup 剩余和系统可用内存的最小值规划，并留 20% 余量；`DAG_MEMORY_MB` 可显式限制上限，校验器对应 `DAG_CHECK_MEMORY_MB`。这是资源快照，不是 OS 内存保留。无法发现单节点容量时要求显式设置预算。
-
-`DAG_GRAPH_MEMORY_MB` 未设置或为0时，根据每个case扣除矩阵、Metadata、线程池和实际算子工作空间后的预算自动规划；正值仅作为额外图预算上限，不覆盖实际资源限制。任务展开、建图或执行器准备资源不足时，`auto`/`parallel` 都在复制和任何数值调用前改为流式执行，报告标为 `serial-resource`，并写入 `resource_limited`、原因、阶段和有效图预算；已经开始计算则绝不重放。该路径省内存，未承诺与并行同速。`DAG_MAX_TASKS`/`DAG_MAX_STEPS` 默认 0（不设总量上限），非零是用户主动限制，达到后明确失败，不静默绕过。
-
-`DAG_STATS_FILE` 可指定统计 JSON；`COMPILER2026_TIMING_FILE` 可指定完整计算秒数文件。只有矩阵文件 I/O 从运行时间扣除，校验由独立程序完成。
-
-## 原题面格式与朴素算法
-
-`DAG_IO_FORMAT=original` 明确选择 `count + [n, matrix]`，输出同格式；默认值为 `public`，不自动猜测。分块应用必须额外提供实际指定的 b：`DAG_BLOCK_SIZE=100` 表示全部 case 使用该值，或 `DAG_BLOCK_SIZES=3,4,8` 按记录逐项指定；两者互斥。public 模式禁止覆盖文件中的 b。原题整数暂按同宿主 uint32 读取，正式字节序仍待确认。
+把下面的 `input.bin` 换成你的输入文件：
 
 ```bash
-DAG_IO_FORMAT=original DAG_BLOCK_SIZE=100 \
-  DAG_METADATA="$PWD/build/block_cholesky.meta" \
-  build/dag_run input-original.bin output-original.bin
-DAG_IO_FORMAT=original build/dag_check input-original.bin output-original.bin
+python3 tools/benchmark.py submit build/dag_run input.bin output.bin \
+  --metadata build/block_cholesky.meta
 ```
 
-原生矩阵标量表达式示例可直接编译并执行：
+`output.bin` 是分解结果。这个启动入口会清理之前实验留下的环境变量，默认自动选择线程数和内存预算。需要限制资源时，在命令后加上 `--threads 8` 或 `--memory-mb 4096` 等参数即可。
+
+默认输入文件是二进制格式：
+
+```text
+uint32：矩阵个数
+随后每个矩阵：uint32 n、uint32 b、n×n 个 double
+```
+
+矩阵按行存储，要求 `b > 0` 且 `n % b == 0`。输出保留相同的矩阵个数、n 和 b，每个结果仍保存完整的 n×n 数组。文件读写遵循配套公开包的约定。
+
+旧题面中不含 b 的格式也有兼容入口，需要明确指定格式和分块大小：
 
 ```bash
-python3 compiler/compile.py examples/naive_cholesky.cpp \
-  --entry naive_cholesky --catalog examples/naive_catalog.json -o build/naive.meta
-DAG_APPLICATION=scalar DAG_IO_FORMAT=original \
-  DAG_METADATA="$PWD/build/naive.meta" \
-  build/dag_run input-original.bin output-original.bin
+python3 tools/benchmark.py submit build/dag_run input-original.bin output-original.bin \
+  --metadata build/block_cholesky.meta --io-format original --block-size 100
 ```
 
-`DAG_APPLICATION=blocked` 为默认正式分块应用，只接受公共算子；`scalar` 是显式的标量扩展示例，支持矩阵元素赋值、算术及 sqrt，不替代正式分块内核。scalar 原题模式无分块参数，绑定器内部占位 b=1，不用于算法分块。尚不支持局部 `double sum` 等任意 C++，未取得的官方朴素源码仍待核对。
+## 怎么测性能
 
-## 唯一常驻测试：端到端性能
+### 和 demo 串行程序比较
 
 ```bash
-python3 tools/benchmark.py build/dag_run artifacts/public20.bin \
-  --metadata build/block_cholesky.meta --threads 0 --mode auto \
-  --repeats 5 --checker build/dag_check --report artifacts/performance.json
+python3 tools/benchmark.py compare-demo
 ```
 
-每轮从启动程序、加载 Metadata、读取输入、计算到生成输出，保留完整计算时间及程序墙钟时间；随后独立校验，不把校验耗时混入性能。失败记录保留并令整体失败，只有校验成功的样本参与成功耗时统计。报告记录输入/程序/Metadata/校验器指纹与 Metadata 大小。
+默认测试公开 20 例，以及 `(n, b)` 为 `(4096, 64)`、`(8192, 32)`、`(8192, 256)`、`(4000, 1)` 的四组输入。双方使用相同输入和算子库，每组各运行一次、不预热，并分别校验结果。
 
-原题面协议使用 `--io-format original`；标量应用使用 `--application scalar`，其报告只用于功能验证，不产生性能中位数或参与性能比较。benchmark 默认清除继承的 DAG 环境设置，因此原格式分块参数必须使用显式 CLI `--block-size 100` 或 `--block-sizes 3,4,8`（按输入记录对应，二者互斥）；不能仅设置父环境的 `DAG_BLOCK_SIZE`。基准向程序和校验器传递同一协议配置。例如：
+只跑其中一组可以写：
 
 ```bash
-python3 tools/benchmark.py build/dag_run input-original.bin \
-  --metadata build/block_cholesky.meta --io-format original --block-size 100 \
-  --mode auto --repeats 5 --checker build/dag_check \
-  --report artifacts/performance-original.json
+python3 tools/benchmark.py compare-demo --datasets n4000-b1
 ```
 
-当前加强校验器使用残差、有限值、正对角线检查；指定的公开验收命令始终额外执行原包 verifier。demo/宿主结果不是正式库或 Kunpeng 成绩。多个配置依次运行，避免构建、生成器与测量并发。
+汇总报告在 `artifacts/benchmark/comparison.json`。其中两种时间要分开看：demo 的原始计时只包住分解函数；当前程序的计时还包含 Metadata 加载、内存分配、任务准备和释放等工作。**它们的原始时间比值不能直接当作同口径加速比。** 报告也记录双方包含文件 I/O 的进程总时间。
 
-临时验证放临时目录，用后删除脚本、数据和日志。项目不保留单元/回归测试套件、CTest 注册或历史测试报告文档。
+### 重复测量当前程序
 
-### 其他算法：仅功能验证
+准备好输入文件后运行：
+
+```bash
+python3 tools/benchmark.py build/dag_run input.bin \
+  --metadata build/block_cholesky.meta --checker build/dag_check \
+  --warmups 1 --repeats 5 --report artifacts/performance.json
+```
+
+每轮启动一个新进程，计算后独立校验。报告包含各轮耗时、Metadata 实际字节数、逐 case 结果和资源限制。测量时请让其他构建和计算任务结束，避免互相干扰。
+
+当前运行时计时只扣除矩阵文件 I/O；加载 Metadata、分配和初始化、任务展开、建图、线程池、算子执行及释放都在计时内。**源码分析和生成 Metadata 是否计入比赛性能时间仍待确认**，目前的运行时计时不能代表包含生成阶段的总时间，详见 [需求中的 O-08](REQUIREMENTS.md#口径与未完成条件)。
+
+如果确实因内存不足而回退或失败，报告会标记 `resource_limited`，保留原因和原始时间，并将其排除出算法速度统计。普通慢样本不会因此被排除；只完成部分 case 也不算整组通过。
+
+## 程序内部怎么工作
+
+```text
+算法源码 + 算子源码
+        ↓ 分析控制流程和读写行为
+     Metadata
+        ↓ 代入本次输入的 n、b
+   任务及其访问区域
+        ↓ 分析依赖，或证明一组任务互相独立
+    多线程执行
+        ↓
+     输出矩阵 L
+```
+
+当前运行时有两条主要并行路径：
+
+- **依赖图执行**：根据读写冲突建立“谁必须等谁”的关系。任务的前驱都完成后，它才进入就绪队列。
+- **分窗口执行**：对能证明独立的循环工作生成一组任务，并行执行完这一组后再继续。它减少了完整图的存储，但窗口之间需要等待。
+
+连续调用还可以压缩成“起始参数 + 重复次数 + 参数增量”，减少任务描述数量；实际执行时仍逐次调用公共算子。线程池和矩阵容量可以跨 case 复用，case 本身按输入顺序处理。
+
+线程默认使用实际允许的一个 NUMA 节点。总内存预算考虑该节点可用内存及进程限制；图预算再扣除矩阵、线程池等开销，不固定为 256 MiB。保留的矩阵容量也计入预算，必要时在数值计算开始前回收。
+
+想读代码，可以从这几个文件开始：
+
+| 文件 | 负责什么 |
+| --- | --- |
+| [compiler/compile.py](compiler/compile.py) | 解析支持的算法源码，生成 Metadata |
+| [compiler/infer_catalog.py](compiler/infer_catalog.py) | 借助 Clang 分析算子的访问行为 |
+| [src/metadata.cpp](src/metadata.cpp) | 解码、参数绑定、任务展开和循环压缩 |
+| [src/graph.cpp](src/graph.cpp) | 从任务的读写区域建立依赖图 |
+| [src/runtime.cpp](src/runtime.cpp) | 线程池、就绪队列和任务执行 |
+| [src/main.cpp](src/main.cpp) | 输入输出、资源预算、路径选择和算子调用 |
+| [tools/benchmark.py](tools/benchmark.py) | 构建、验收、性能测量和报告 |
+
+## 其他算法和诊断工具
+
+项目支持的是一个结构化 C++ 子集，包括受支持的 `for`、整数 `if/else`、算子调用及部分标量表达式，尚不能编译任意 C++。语法范围见 [编译器说明](compiler/README.md)，算子源码分析见 [相关说明](docs/operator_source_inference.md)。
+
+单独验证朴素 Cholesky、右看式 Cholesky 和二维波前递推示例：
 
 ```bash
 python3 tools/benchmark.py verify-algorithms
 ```
 
-### DAG 调度时间估算（显式诊断命令）
+这些用例用于检查同一套机制能否处理不同算法，不参与分块算法的性能统计。`accept-public20` 已包含这一步。
 
-如果需要单独观察算子耗时、运行时任务图规模和调度策略的理想化影响，可以使用新增的 `estimate-schedule` 子命令。它不会被普通 benchmark、`summarize()`、`compare-reports` 或正式性能排名调用，也不会修改默认 runtime 调度配置。
-
-先构建估算工具和当前 Metadata：
+若要研究图的关键路径或调度策略，可以运行估算工具：
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target dag_estimate metadata
 python3 tools/benchmark.py estimate-schedule \
-  --metadata build/block_cholesky.meta \
-  --n 16 --b 4 \
-  --workers 1 2 4 8 \
-  --samples 5 --warmups 0 \
-  --policy current fifo \
-  --report artifacts/estimate-schedule.json \
-  --dag-estimate build/dag_estimate
+  --metadata build/block_cholesky.meta --n 16 --b 4 \
+  --workers 1 2 4 8 --samples 5 --warmups 0 --policy current fifo \
+  --dag-estimate build/dag_estimate --report artifacts/estimate-schedule.json
 ```
 
-默认 `--warmups 0`，每个算子样本在计时区间外重新初始化缓冲区，适合原始应用数据没有预热机会的场景。校准使用当前构建中链接的 `cholesky`、`trsm` 和 `madd` C ABI；如果库或 ABI 无法使用，命令会报告错误，不会生成伪造耗时。
+它会生成 JSON 和 SVG，帮助观察任务数、依赖边和理想化调度时间。估算没有覆盖真实运行中的全部准备成本、缓存争用和同步开销，应与端到端测量分开使用。
 
-估算工具复用 `src/metadata.cpp` 和 `src/graph.cpp` 的 Metadata 解码、参数化实例化和完整 CSR 构图路径，报告任务数、边数、图内存、copy/zero-upper 阶段，以及 `current` 和 `fifo` 的估计 DAG 时间、总建模工作量、关键路径、理论下界、利用率、窃取次数、continuation 次数和各 worker busy time。`--graph-memory-mb`、`--max-tasks`、`--max-steps` 超限会明确标记 `resource_limited`。
+## 换成比赛正式库
 
-报告还包含 demo baseline 的同一 `n,b` kernel 流程实测，并生成同名 `.svg` 对照图。该图只用于诊断，不是端到端性能结果。估算结果不包含 Metadata 解码、任务展开、建图、矩阵分配、线程池启动、copy/zero-upper（这些阶段会单独标记）、cache contention、内存带宽、NUMA、同步和 CPU 频率变化；报告固定包含 `performance_eligible: false` 和 `correctness_validated: false`。macOS 上可以运行这条独立估算路径，但现有正式 worker runtime 仍依赖 Linux CPU affinity/NUMA 接口，因此本机结果不能代表 Ubuntu/Kunpeng 正式性能。
-
-该 benchmark 子命令构建当前运行时，将朴素左看式 Cholesky、右看式标量 Cholesky、二维波前递推源码分别编译成 Metadata，并在 n=3/7/16/31 的多 case 输入上验证串行和并行执行。两个 Cholesky 示例使用已知正对角因子构造输入，另跑配套 verifier 和 dag_check；波前使用独立的精确分数递推参考。示例只证明当前源码子集适用性，不冒充未提供的题目源码。
-
-`accept-public20` 默认在分块计时结束后执行同一功能门槛；普通 benchmark 命令加 `--validate-algorithms` 可附加运行。功能失败令命令失败，报告以 `functional_only` / `performance_eligible: false` 标记，保留每算法 Metadata 大小、指纹和诊断。只有分块 Cholesky 进入性能汇总与比较；功能用例的时间、Metadata 大小不会累加到分块成绩。默认功能报告为 `artifacts/functional/functional-algorithms.json`。
-
-## 正式库
+把路径替换为真实的评委静态库：
 
 ```bash
 cmake -S . -B build-judge -DCMAKE_BUILD_TYPE=Release \
   -DDAG_REQUIRE_OFFICIAL=ON \
   -DDAG_OFFICIAL_LIBRARY=/absolute/path/to/judge_kernels.a
-cmake --build build-judge -j 8
+cmake --build build-judge --parallel 4
+python3 tools/benchmark.py accept-public20 --build-dir build-judge \
+  --official-library /absolute/path/to/judge_kernels.a
 ```
 
-正式环境使用真实评委归档，重新运行上述端到端性能入口并选择 `build-judge` 下的程序、Metadata 和校验器。外部链接配置只说明链接路径，不能认证库来源。目标是 Ubuntu 22.04 / Kunpeng-920 的实际获准单 NUMA 资源。
+CMake 默认分析仓库中的 demo 算子源码。若评委另提供了算子实现源码或头文件，应同时配置 `DAG_OPERATOR_SOURCES`、`DAG_OPERATOR_INCLUDES`，让分析使用的访问语义与实际链接的库一致。
 
-源码子集和 Metadata 格式见 [编译器说明](compiler/README.md)，实际模块见 [模块输入输出](docs/problem_alignment.md)。
+正式环境是 Ubuntu 22.04 / Kunpeng-920，需要在实际获准资源上重新验收和测量。本地 demo 通过不代表正式环境已通过。
 
-## 比赛候选与干净部署
+## 进一步阅读
 
-候选commit、配置、Metadata大小、完整性能和验收证据见根目录 [GOAL.md](GOAL.md) 的Pareto台账。每个 `pareto/Pxxx` 标签指向实际被测实现，证据在 `results/pareto/Pxxx/`。本地宿主成绩不等于正式目标机成绩。
+- [题目原文](docs/problem_statement.md)：比赛希望我们完成什么。
+- [需求说明](REQUIREMENTS.md)：接口、计时、评分及尚待确认的问题。
+- [运行策略](docs/runtime_strategy.md)：不同执行路径的说明。
+- [提交说明](SUBMISSION.md)：构建、验收和部署步骤。
 
-benchmark默认清除继承的DAG实验设置，显式CLI参数再覆盖；`--inherit-env` 才保留继承配置。部署也可使用同一工具的干净入口，子程序仍只接收两个文件参数：
-
-```bash
-python3 tools/benchmark.py submit build/dag_run input.bin output.bin \
-  --metadata build/block_cholesky.meta \
-  --configuration-report artifacts/submission-config.json
-```
-
-正式部署优先采用这个干净入口；前面的直接环境变量调用用于明确配置的本地运行。需要目标机限制时，使用 `--threads`、`--memory-mb`、`--graph-memory-mb` 等显式 CLI 参数，或在确有需要时选择 `--inherit-env`；操作系统亲和集、cgroup 和 rlimit 不被绕过。
-
-内存受限运行保留原始耗时和失败记录，但不进入完整算法性能汇总。失败报告分别列出已校验有效、资源回退、已执行但未校验、资源失败、未运行和错误/未知的 case 数量；没有验证的先前结果不产生速度。`compare-reports` 仅比较相同输入及资源约束下的共同有效集合，输出覆盖率；资源指纹包含当前 cgroup 到可见挂载根的稳定内存/cpuset 限额，不含波动的 usage/free 计数。
-
-该入口默认自动线程与预算，避免把本地16线程或低内存限制带到目标机。确有目标资源限制时通过 `--threads`、`--memory-mb`、`--graph-memory-mb` 明确指定，OS亲和集/cgroup限制始终有效。
-
-资源回退的原始耗时保留，但不进入算法完整性能汇总；共同有效case诊断单独列出覆盖率和排除原因，不能冒充完整公开集成绩。可在相同输入、硬件资源和算子库条件下执行 `python3 tools/benchmark.py compare-reports report-a.json report-b.json --report comparison.json`，只比较共同有效case。
-
-## R-28：默认执行文件精简
-
-当前默认编译输出lean/lean-deflate，分块Metadata为141字节。删除默认SHA-256来源字段、额外FNV和zlib包装校验；源变量名、表达式运算符及重复调用引用改为编号。外部算子和缓冲区绑定身份仍各保存一次，控制流程与读写语义不变。
-
-重复图扫描和契约审计默认关闭，原有DAG_AUDIT=1可显式开启。资源约束、数值正确性与配套verifier门槛仍保留。默认编译不计算来源SHA；仅显式旧格式或可选json-debug在离线编译时生成旧字段，历史Metadata仍可读。
-
-实现commit与五轮交错结果见 [P007](results/pareto/P007/manifest.json)。此前SUBMISSION.md的P005为历史可回退交接，不代表这次更新后的默认产物。验收继续使用现有accept-public20入口，并包含R27功能验证。
+历史计划和实验记录可通过 Git 查阅；当前性能结果以本次 benchmark 报告为准。

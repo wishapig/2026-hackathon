@@ -1,7 +1,0 @@
-[ 10%] Built target metadata
-[ 40%] Built target contest_kernels
-[ 80%] Built target dag_runtime
-[100%] Built target dag_run
-[100%] Built target spd_generator
-[100%] Built target public_verifier
-[100%] Built target dag_check

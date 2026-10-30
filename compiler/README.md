@@ -2,35 +2,25 @@
 
 > **非规范文档**：项目唯一需求与验收依据见 [REQUIREMENTS.md](../REQUIREMENTS.md)。本页仅说明实现、使用方式、设计候选或历史验证；其中的约束性表述不能新增、覆盖或缩小规范要求。
 
-Compile the supplied source, without enumerating any particular n/b:
+The default CMake build analyzes operator implementations with Clang, then parses
+algorithm control flow with the Python structured-C++ frontend. These are two
+separate steps: using Clang for operator access inference does not make the
+algorithm frontend an arbitrary C++ compiler.
 
 ```bash
-python3 compiler/compile.py vendor/demo/src/baseline/block_cholesky.cpp \
-  --catalog examples/catalog.json -o build/block_cholesky.meta
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target metadata
 ```
 
-The catalog is a trusted, explicit access/ABI declaration. Its signature and
-read/write rectangles are substituted at each source call. Operator names select
-contracts, **not dependency formulas**. The runtime derives conflicts from the
-resulting regions. Changing the loop bounds changes the compiled program;
-changing n/b binds the same artifact. The catalog conservatively describes full
-blocks, including `madd`'s read-modify-write output and aliases.
+See [operator source analysis](../docs/operator_source_inference.md) for direct
+compiler commands and source/include configuration. The generated `.meta` file
+contains the runtime-required semantics; `catalog.generated.json` is an optional
+analysis report. Explicit `--catalog` remains a compatibility input. Operator
+identities select access declarations and ABI bindings, not dependency formulas.
 
-The current implementation is a dependency-free strict structured-C++ parser,
-not the planned Clang frontend. It handles the complete supplied demo driver but
-is intentionally not a general C++ implementation. This is an explicit current
-capability boundary; migrating to Clang can retain the metadata/runtime schema.
-Compilation fails if any unsupported statement or unmodeled side effect is
-encountered. It does not silently skip unknown function calls or scalar stores.
-The only accepted includes are the audited demo declaration header `"kernels.h"`
-and `<algorithm>`, `<cmath>`, `<cstddef>`, `<stdexcept>`, `<vector>`, before code.
-These are trusted **unmodified** headers; source-local overrides, injected
-compiler macros and custom headers are outside the supported input contract.
-Unknown includes, macro directives and preprocessor control are rejected rather
-than silently discarding transitive macros. Backslash-newline physical line
-splicing is rejected before comment lexing, including CRLF and whitespace forms.
-Source/catalog must be trusted local inputs; this frontend does not execute a
-C++ preprocessor or expand arbitrary headers.
+The algorithm parser rejects unsupported statements and unmodeled side effects.
+It accepts a strict structured subset, with known includes before the function;
+it does not implement arbitrary preprocessing, macros or header expansion.
 
 Supported source shape:
 
@@ -95,8 +85,8 @@ python3 compiler/compile.py examples/naive_cholesky.cpp \
 ```
 
 Its empty catalog is sufficient because scalar expression semantics and exact
-element access contracts are compiler-defined. A new external operator still
-requires a declared catalog and an explicit application ABI adapter.
+element access contracts are compiler-defined. A new external operator requires inferred or explicitly declared access semantics
+and an application ABI adapter.
 
 ## Artifact contract
 

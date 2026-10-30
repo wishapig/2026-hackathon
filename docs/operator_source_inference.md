@@ -1,6 +1,6 @@
 # 从算子源码生成 Metadata
 
-实现记录，需求依据为 REQUIREMENTS.md 的 R-01、R-03、R-16、R-28。旧文档和旧 catalog 保留为历史资料。
+实现记录，需求依据为 REQUIREMENTS.md 的 R-01、R-03、R-16、R-28。显式 catalog 保留为兼容输入。
 
 ## 当前默认流程
 
@@ -61,10 +61,8 @@ python3 compiler/compile.py vendor/demo/src/baseline/block_cholesky.cpp \
 - 算子仍遵循当前项目已有的同步、可重入、内部单线程执行约定；这些调度属性并非由 AST 自动证明。现有算法驱动解析器的语法范围不变。
 - 新算子的参数和访问契约可以自动生成；运行新的符号仍需链接其实现并接入调用 ABI。本次不改变正式 cholesky/trsm/madd 调用约束。
 
-默认 Metadata 从原 **139 字节**降至 **136 字节**。没有新增运行期分析、来源摘要、审计字段或隐藏的必需伴随文件。
+Metadata 大小以本次生成文件为准。分析报告不是运行必需文件；默认执行格式不包含来源摘要或审计字段。
 
-## 验证
+## 验证入口
 
-本机通过独立构造的矩形新算子、参数重排 wrapper、偏移指针、部分写入和引用 helper 检查；检查脚本使用临时目录，不增加常驻单测。Clang 分析与 CMake 的 Metadata 生成均通过。
-
-ARM64 服务器：24 个计算 worker，公开 20/20 通过原包 verifier，附加数值检查通过，三个其他算法串并行功能通过。最终验收完整计算时间 0.342742 秒，Metadata 136 字节；这是单次运行，不能单凭该值宣称性能收益。证据见 `results/source-inference/acceptance/`。另外用非二次幂分块及压缩任务验证了既有 `DAG_AUDIT=1` 的 graph/pattern 两条路径。所用库为 demo-local-debug，结果不是正式评测成绩。
+使用 `tools/benchmark.py accept-public20` 验证构建、公开结果和其他算法功能。更换算子实现后，应重新生成 Metadata 并核对访问语义。历史性能数据已清理，当前结果以本次报告为准。

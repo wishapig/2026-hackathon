@@ -1,9 +1,0 @@
-[ 10%] Generating block_cholesky.meta
-[ 40%] Built target contest_kernels
-[ 80%] Built target dag_runtime
-[ 80%] Built target metadata
-[100%] Built target dag_run
-[100%] Built target spd_generator
-[100%] Built target public_verifier
-[100%] Built target dag_check
-compiled /root/2026-hackathon-source-inference/vendor/demo/src/baseline/block_cholesky.cpp: 136 bytes, operators=cholesky,madd,trsm

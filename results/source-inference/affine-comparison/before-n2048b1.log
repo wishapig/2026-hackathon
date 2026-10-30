@@ -1,1 +1,0 @@
-{"passed": true, "metadata_bytes": 136, "successful_samples": 3, "full_batch_samples": 3, "measured_samples": 3, "resource_limited_samples": 0, "complete_performance": true, "median_seconds": 5.798316349, "min_seconds": 5.753601645, "max_seconds": 5.863193076}
