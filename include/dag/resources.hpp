@@ -1,4 +1,5 @@
 #pragma once
+#include "dag/core.hpp"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -216,7 +217,7 @@ inline std::size_t available_memory_budget(std::size_t requested_bytes = 0,
     if (requested_bytes)
         available = std::min(available, requested_bytes);
     if (available < 1024 * 1024)
-        throw std::runtime_error("insufficient available memory for allocation budget");
+        throw ResourceLimit("insufficient available memory for allocation budget");
     return available;
 }
 } // namespace dag

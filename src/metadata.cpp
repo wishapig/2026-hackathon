@@ -592,9 +592,10 @@ Program load_metadata(const std::string &path, const Limits &limits) {
         throw std::runtime_error("cannot open metadata: " + path);
     auto size = in.tellg();
     // Reserve space for parser/tree overhead as well as source bytes.
-    if (size < 24 || static_cast<std::uint64_t>(size) >
-                         std::min<std::size_t>(64ull * 1024 * 1024, limits.memory_bytes / 32))
-        throw std::runtime_error("metadata size/budget violation");
+    if (size < 24 || static_cast<std::uint64_t>(size) > 64ull * 1024 * 1024)
+        throw std::runtime_error("metadata size violation");
+    if (static_cast<std::uint64_t>(size) > limits.memory_bytes / 32)
+        throw ResourceLimit("metadata storage exceeds memory budget");
     in.seekg(0);
     std::array<unsigned char, 24> h{};
     in.read(reinterpret_cast<char *>(h.data()), 24);
@@ -605,8 +606,10 @@ Program load_metadata(const std::string &path, const Limits &limits) {
         throw std::runtime_error("metadata magic/version mismatch");
     const auto length = little(h.data() + 8);
     const auto stored_length = static_cast<std::uint64_t>(size) - 24;
-    if (length > std::min<std::size_t>(64ull * 1024 * 1024, limits.memory_bytes / 32))
-        throw std::runtime_error("decoded metadata size/budget violation");
+    if (length > 64ull * 1024 * 1024)
+        throw std::runtime_error("decoded metadata size violation");
+    if (length > limits.memory_bytes / 32)
+        throw ResourceLimit("decoded metadata exceeds memory budget");
     std::string payload;
     if (magic == "DAGMETA1") {
         if (length != stored_length)
@@ -627,7 +630,7 @@ Program load_metadata(const std::string &path, const Limits &limits) {
         if (limits.memory_bytes < inflate_reserve ||
             length > limits.memory_bytes - inflate_reserve ||
             stored_length > limits.memory_bytes - inflate_reserve - length)
-            throw std::runtime_error("compressed metadata workspace exceeds memory budget");
+            throw ResourceLimit("compressed metadata workspace exceeds memory budget");
         std::string stored(static_cast<std::size_t>(stored_length), '\0');
         in.read(stored.data(), static_cast<std::streamsize>(stored_length));
         if (!in)
@@ -637,6 +640,8 @@ Program load_metadata(const std::string &path, const Limits &limits) {
         auto consumed = static_cast<uLong>(stored_length);
         const int status = uncompress2(reinterpret_cast<Bytef *>(payload.data()), &decoded,
                                        reinterpret_cast<const Bytef *>(stored.data()), &consumed);
+        if (status == Z_MEM_ERROR)
+            throw ResourceLimit("zlib workspace allocation failed");
         if (status != Z_OK || decoded != length || consumed != stored_length)
             throw std::runtime_error("invalid compressed metadata stream or length");
     }
@@ -674,7 +679,7 @@ Program load_metadata(const std::string &path, const Limits &limits) {
     result.nodes = parse_nodes(root.at("program"), ops);
     result.retained_bytes = program_bytes(result);
     if (result.retained_bytes > limits.memory_bytes)
-        throw std::runtime_error("decoded metadata exceeds memory budget");
+        throw ResourceLimit("decoded metadata exceeds memory budget");
     return result;
 }
 void enumerate_program(const Program &program, Parameters p, const Limits &limits,

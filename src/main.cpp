@@ -601,10 +601,13 @@ int main(int argc, char **argv) {
                     // Reserve worker stacks before expansion, even on the first case.
                     // The runtime supplies its own reservation formula; do not bake
                     // this host's worker count or a fixed graph capacity into it.
-                    const auto pool_reserve = std::max(retained_runtime_bytes,
+                    const auto desired_pool = std::max(retained_runtime_bytes,
                         dag::Executor::minimum_reserved_bytes(planned_workers));
-                    if (pool_reserve >= case_budget)
-                        throw dag::ResourceLimit("worker reservation exceeds case budget");
+                    // A tiny instance may select serial execution and need no
+                    // pool at all. Defer a pool-capacity failure until that
+                    // decision is known; account existing allocations regardless.
+                    const auto pool_reserve = desired_pool < case_budget
+                        ? desired_pool : retained_runtime_bytes;
                     const auto cap_graph = [&](std::size_t available) {
                         return graph_budget ? std::min(graph_budget, available) : available;
                     };
@@ -668,6 +671,8 @@ int main(int argc, char **argv) {
                         }
                         resource_stage = "worker-pool";
                         if (!executor) {
+                            if (dag::Executor::minimum_reserved_bytes(planned_workers) >= parallel_budget)
+                                throw dag::ResourceLimit("worker reservation exceeds parallel budget");
                             options.memory_bytes = parallel_budget;
                             executor = std::make_unique<dag::Executor>(options);
                         }
