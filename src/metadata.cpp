@@ -813,8 +813,13 @@ struct Evaluator {
                 values[node.slot] = checked(eval(node.value, values));
                 break;
             case Node::Kind::For: {
-                Int first = checked(eval(node.start, values)), last = eval(node.stop, values),
-                    step = eval(node.step, values);
+                Int first = checked(eval(node.start, values)), last = eval(node.stop, values);
+                // C++ never evaluates the increment of a zero-iteration loop.
+                // The supported step is invariant, but need not be defined when
+                // the loop body is unreachable for the actual parameters.
+                if (first >= last)
+                    break;
+                Int step = eval(node.step, values);
                 if (step <= 0)
                     throw std::runtime_error("nonpositive loop step");
                 for (Int i = first; i < last;) {
