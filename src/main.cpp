@@ -542,7 +542,7 @@ int main(int argc, char **argv) {
             // with the process-wide ceiling; do not subtract them twice.
             const auto retained_matrices = (a.capacity() + l.capacity()) * sizeof(double);
             const auto managed = metadata_reserve + auxiliary + retained_runtime_bytes + retained_matrices;
-            const auto fresh = dag::available_memory_budget(0, permitted_cpus);
+            const auto fresh = dag::available_memory_budget(requested_memory, permitted_cpus);
             const auto fresh_total = fresh > std::numeric_limits<std::size_t>::max() - managed
                 ? std::numeric_limits<std::size_t>::max() : fresh + managed;
             const auto case_total = std::min(memory, fresh_total);
