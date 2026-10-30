@@ -20,7 +20,7 @@
   ],
   "warmup_report": "../../overnight/confirmation/0-scope.json",
   "performance_reports": "../../overnight/confirmation/[1..5]-scope.json",
-  "baseline_median_seconds": 0.278404951,
+  "baseline_median_seconds": 0.27840519900000005,
   "acceptance": "acceptance/acceptance.json",
   "status": "validated uncertain frontier candidate; modest total difference within sample variability, not a target-machine speed claim",
   "coverage": "20/20; zero resource exclusions; R27 all3 passed and excluded from performance",
