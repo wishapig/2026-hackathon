@@ -1,7 +1,7 @@
 {
   "implementation_commits": {
     "baseline": "3429b75d70adb417588f0ecd6c583f32ba6abaa6",
-    "combined": "5a90aaf",
+    "combined": "5a90aaf6c938d68a91742b499254082f33242847",
     "bulk": "a90265190e8f2f24ecc9554ee25f42aca8214f88"
   },
   "seconds": {
@@ -29,7 +29,7 @@
     "combined": 0.30629277200000005,
     "bulk": 0.2992713225
   },
-  "decision": "Retain every sample but do not turn this drifting screen into a reliable percent speedup; baseline varied323-444ms except all raw range retained. Independent repeated confirmation required.",
+  "decision": "Retain every sample but do not turn this drifting screen into a reliable percent speedup; baseline actual range323-444ms, all raw samples retained. Independent repeated confirmation required.",
   "resource_classification": "No reported resource-limited cases, no OOM evidence; timing variability is not excluded as memory insufficiency.",
   "mechanism": "Bulk candidate case12 surrounding time4-6ms vs16-27ms; first-touch remains timed before input read.",
   "coverage": "20/20 all samples; no resource exclusions; local demo only"
