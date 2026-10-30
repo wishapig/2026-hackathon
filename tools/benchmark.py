@@ -52,6 +52,7 @@ def add_controls(parser, default_mode='auto', public_only=False):
     parser.add_argument('--mode', choices=['auto', 'parallel', 'serial'])
     parser.add_argument('--batch', type=int)
     parser.add_argument('--backend', choices=['atomic', 'owner'])
+    parser.add_argument('--priority', choices=['none', 'critical'])
     if not public_only:
         parser.add_argument('--io-format', choices=['public', 'original'])
         parser.add_argument('--application', choices=['blocked', 'scalar'])
@@ -68,6 +69,7 @@ def execution_environment(args, parser):
     explicit, defaults = {}, {}
     options = [('threads', 'DAG_THREADS', '0'), ('mode', 'DAG_MODE', args.default_mode),
                ('batch', 'DAG_BATCH', '1'), ('backend', 'DAG_BACKEND', 'atomic'),
+               ('priority', 'DAG_PRIORITY', 'none'),
                ('io_format', 'DAG_IO_FORMAT', 'public'),
                ('application', 'DAG_APPLICATION', 'blocked')]
     for attr, key, fallback in options:
@@ -92,6 +94,8 @@ def execution_environment(args, parser):
         parser.error('threads must be nonnegative and batch must be positive')
     if args.mode not in ('auto', 'parallel', 'serial') or args.backend not in ('atomic', 'owner'):
         parser.error('invalid inherited mode/backend')
+    if args.priority not in ('none', 'critical'):
+        parser.error('invalid inherited priority policy')
     if args.io_format not in ('public', 'original') or args.application not in ('blocked', 'scalar'):
         parser.error('invalid inherited protocol/application')
     # Required harness paths are always replaced later; preserve the discarded
@@ -397,7 +401,7 @@ def accept_public20(argv):
               'requirements': ['R-12', 'R-13', 'R-14', 'R-15', 'R-18', 'R-19', 'R-21', 'R-22', 'R-24'],
               'build_dir': str(build), 'result_dir': str(result_dir), 'stages': {},
               'configuration': {'threads': a.threads, 'mode': a.mode,
-                                'batch': a.batch, 'backend': a.backend},
+                                'batch': a.batch, 'backend': a.backend, 'priority': a.priority},
               'environment_policy': env_policy}
     env.update(DAG_IO_FORMAT='public', DAG_APPLICATION='blocked', DAG_MODE=a.mode,
                DAG_BATCH=str(a.batch), DAG_BACKEND=a.backend,
@@ -543,7 +547,7 @@ def main():
               'environment_policy': env_policy,
               'validation_scope': 'Selected checker. Use accept-public20 for the supplied verifier workflow.',
               'configuration': {'threads': a.threads, 'batch': a.batch, 'mode': a.mode,
-                                'backend': a.backend},
+                                'backend': a.backend, 'priority': a.priority},
               'scope': 'Each sample is a fresh process; warmups affect OS caches, not reusable process resources.',
               'summary': {'metadata_bytes': a.metadata.stat().st_size},
               'samples': []}

@@ -417,6 +417,10 @@ int main(int argc, char **argv) {
         if (options.backend != "atomic" && options.backend != "owner")
             throw std::runtime_error("DAG_BACKEND must be atomic or owner");
         options.audit = number("DAG_AUDIT", 0, 1) != 0;
+        const auto priority = env("DAG_PRIORITY", "none");
+        if (priority != "none" && priority != "critical")
+            throw std::runtime_error("DAG_PRIORITY must be none or critical");
+        options.critical_path = priority == "critical";
         const auto memory_mb =
             number("DAG_MEMORY_MB", 0, std::numeric_limits<std::size_t>::max() / (1024 * 1024));
         if (!memory_mb && !env("DAG_MEMORY_MB").empty())
@@ -789,6 +793,7 @@ int main(int argc, char **argv) {
                << ",\"application\":" << quoted(application)
                << ",\"io_format\":" << quoted(io_format)
                << ",\"mode\":" << quoted(mode) << ",\"backend\":" << quoted(options.backend)
+               << ",\"priority\":" << quoted(priority)
                << ",\"memory_budget_bytes\":" << memory
                << ",\"requested_memory_bytes\":" << requested_memory
                << ",\"graph_budget_bytes\":" << graph_budget
