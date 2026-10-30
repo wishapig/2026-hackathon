@@ -2,6 +2,8 @@
 
 每次工作先读 [REQUIREMENTS.md](REQUIREMENTS.md)，这是唯一需求规范。本文仅说明当前程序用法。
 
+**第二轮睡前推荐：round2/baseline（9690887），默认Metadata141字节。** 新实验没有稳定全程收益，保持P007数值实现并保留已提交R-27/R-28功能工具。当前生产源码与此完整基线一致；构建、正式库重链接、验收和干净启动见 [SUBMISSION.md](SUBMISSION.md) 顶部，旧候选为历史记录。
+
 **比赛推荐与准确提交命令见 [SUBMISSION.md](SUBMISSION.md)。** 原交接版本为P005（257字节Metadata）；R-28后续实现P007改为141字节，变更和新证据见下节。默认资源自适应，不携带本机线程/内存覆盖。正式库和目标机未验证。
 
 Python 编译器将支持的源码子集与算子契约转换为 Metadata；C++ runtime 按实际参数构图并调用公共 cholesky/trsm/madd。按后续回复，当前验收使用 public20 的 `count + [n, b, matrix]` 协议；原题面格式另有显式兼容模式。

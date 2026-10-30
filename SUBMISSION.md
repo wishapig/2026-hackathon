@@ -1,5 +1,27 @@
 # 比赛提交交接
 
+## 第二轮推荐（2026-10-30睡前交接）
+
+**推荐完整基线：96908872cab3e24e22096fbeac95c64a0f78862d，标签round2/baseline。** 数值实现与P007一致，默认Metadata141字节，包含当前R-27其他算法功能验证和R-28无审计负担规则。本轮fanout的CSE、计数批发、派发、缓冲、页布局均已检查并测量，没有稳定胜出的新增默认策略。不要从下方历史P005命令取旧版本。
+
+    git worktree add --detach ../contest-round2-submit round2/baseline
+    cd ../contest-round2-submit
+    cmake -S . -B build-submit -DCMAKE_BUILD_TYPE=Release -DDAG_METADATA_ENCODING=auto -DDAG_REQUIRE_OFFICIAL=ON -DDAG_OFFICIAL_LIBRARY=/absolute/path/to/real_judge_kernels.a
+    cmake --build build-submit --parallel 4
+    python3 tools/benchmark.py accept-public20 --build-dir build-submit --output-dir artifacts/acceptance --official-library /absolute/path/to/real_judge_kernels.a --threads 0 --check-threads 4 --clean-env
+    python3 tools/benchmark.py submit build-submit/dag_run input.bin output.bin --metadata build-submit/block_cholesky.meta --configuration-report submission-config.json
+
+真实评委库路径必须替换；本地调试时去掉require-official和library两个CMake选项及验收official-library选项，但结果只属于demo内核。默认启动会清理继承的DAG实验变量并使用实际单NUMA资源，不硬设本机线程/内存。
+
+本轮基线公开verifier20/20、加强检查20/20、三种其他算法串并行功能验证均通过；其他算法不进入性能成绩。独立五轮中位数0.284185243秒；最后交错基线0.289276792秒，目标自适应THP备选P008为0.287214250秒，范围重叠、未确认收益。推荐简单基线。
+
+P008完整commit：a3b37ad7301fcc21475bc817983650eb30369acf，141字节，适合取得实际目标机后独立对照；它按系统页大小/策略建议L大页，失败时回退并退还预算，数值与计时边界不变。它不是默认提交版本。回退选round2/baseline或历史pareto/P007（后者缺少后续已提交的功能工具，优先完整基线）。
+
+证据：[本轮基线](results/round2/baseline/manifest.json)、[同场对照](results/round2/final-page-comparison/common-scope.json)、[P008](results/pareto/P008/manifest.json)、[本轮目标与结论](PERFORMANCE_GOAL.md)。临时分支不自动进入提交；标签和证据不覆盖。正式目标环境尚未验证。第二轮最终本地验收映射见 [审计记录](results/round2/final-audit.json)。
+
+## 以下为第一轮历史交接
+
+
 > **R-28后续更新**：当前默认实现为P007（734db87d4101c8939e19ec3e98d381ac029445cf），执行Metadata为141字节，不含SHA256/FNV或原始局部变量名，重复审计默认关闭；旧格式仍可读。此文中的P005/P006及257/292字节是历史交接记录。最新证据见 [P007](results/pareto/P007/manifest.json)；默认验收命令不变。
 
 本轮本地优化已收口，推荐 **P005**。正式评委静态库及 Ubuntu 22.04/Kunpeng-920 尚未取得，**本地通过不等于正式目标机通过，也不能推断比赛得分**。

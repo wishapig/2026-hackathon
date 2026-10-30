@@ -1,0 +1,50 @@
+{
+  "purpose": "All experiment commits retained in branches or archive tags; clean auxiliary worktrees removed after evidence archival",
+  "worktrees": [
+    {
+      "worktree": "/home/wishapig/hackathon",
+      "HEAD": "fe78add87582bbaaf772e5369924cdc75b4acfd0",
+      "branch": "refs/heads/main"
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-round2/baseline",
+      "HEAD": "96908872cab3e24e22096fbeac95c64a0f78862d",
+      "detached": ""
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-round2/buffer",
+      "HEAD": "322acfdcdd64b9cb45fa4d18739253a553b328ee",
+      "branch": "refs/heads/round2/buffer"
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-round2/combined",
+      "HEAD": "109e3612dbfa22faf7b3551b6d8181015b7089f0",
+      "detached": ""
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-round2/dispatch",
+      "HEAD": "361574c73bb2b9dc8a577a49ce4365cd98695f7a",
+      "branch": "refs/heads/round2/dispatch"
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-round2/final-candidate",
+      "HEAD": "a3b37ad7301fcc21475bc817983650eb30369acf",
+      "detached": ""
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-round2/prepare",
+      "HEAD": "7de702a037ecb7f32502e4f32cdbcf33ca0bae5a",
+      "branch": "refs/heads/round2/prepare"
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-round2/runtime",
+      "HEAD": "b5e36a5f66b8f2ba4ec1dcea2b8ed945290c116c",
+      "branch": "refs/heads/round2/runtime"
+    },
+    {
+      "worktree": "/home/wishapig/hackathon-round2/thp",
+      "HEAD": "1b057762bc99b10f8c2a27ec437014795bc6659f",
+      "branch": "refs/heads/round2/thp"
+    }
+  ]
+}
