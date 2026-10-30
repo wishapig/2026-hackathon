@@ -495,6 +495,7 @@ int main(int argc, char **argv) {
         if (count > memory / sizeof(CaseStats) / 8)
             throw std::runtime_error("case statistics exceed budget");
         stats.reserve(count);
+        std::vector<double> a, l;
         for (std::uint32_t index = 0; index < count; ++index) {
             active_case = index;
             resource_stage = "input-header";
@@ -516,13 +517,20 @@ int main(int argc, char **argv) {
                 static_cast<std::uint64_t>(std::numeric_limits<int>::max()))
                 throw std::runtime_error("matrix dimension exceeds official int indexing range");
             const auto elements = static_cast<std::size_t>(n) * n;
+            // Reuse adjacent equal shapes, without retaining a larger previous
+            // allocation when the next case shrinks or grows.
+            if (a.size() != elements) {
+                std::vector<double>().swap(a);
+                std::vector<double>().swap(l);
+            }
             if (consumed_bytes > file_bytes ||
                 elements > (file_bytes - consumed_bytes) / sizeof(double))
                 throw std::runtime_error("truncated matrix payload");
             consumed_bytes += elements * sizeof(double);
             if (elements > (memory - metadata_reserve) / sizeof(double) / 2)
                 throw dag::ResourceLimit("matrix buffers exceed memory budget");
-            const auto matrix_bytes = elements * sizeof(double) * 2;
+            const auto matrix_bytes = std::max(elements, a.capacity()) * sizeof(double) +
+                                      std::max(elements, l.capacity()) * sizeof(double);
             const auto auxiliary = stats.capacity() * sizeof(CaseStats) +
                                    block_sizes.capacity() * sizeof(std::uint32_t);
             if (auxiliary > memory - metadata_reserve - matrix_bytes)
@@ -548,7 +556,14 @@ int main(int argc, char **argv) {
                 retained_runtime_bytes = 0;
             }
             resource_stage = "matrix-allocation";
-            std::vector<double> a(elements), l(elements);
+            if (a.empty()) {
+                a.resize(elements);
+                l.resize(elements);
+            } else if (program.nodes.empty() || program.nodes.front().kind != dag::Node::Kind::Copy) {
+                // Preserve the original zero-initialized output semantics unless
+                // the first semantic action provably overwrites the full buffer.
+                std::fill(l.begin(), l.end(), 0.0);
+            }
             read(input, a.data(), elements * sizeof(double), io_seconds);
             if (!std::all_of(a.begin(), a.end(), [](double x) { return std::isfinite(x); }))
                 throw std::runtime_error("non-finite input matrix");
@@ -709,10 +724,7 @@ int main(int argc, char **argv) {
             if (!original_format)
                 write(output, &b, 4, io_seconds);
             write(output, l.data(), elements * sizeof(double), io_seconds);
-            a.clear();
-            a.shrink_to_fit();
-            l.clear();
-            l.shrink_to_fit();
+
             st.compute = elapsed(case_start) - (io_seconds - io_before);
             stats.push_back(st);
         }
@@ -733,6 +745,8 @@ int main(int argc, char **argv) {
         }
         resource_stage = "finalize";
         active_case.reset();
+        std::vector<double>().swap(a);
+        std::vector<double>().swap(l);
         executor.reset();
         {
             IOTime time{io_seconds};
