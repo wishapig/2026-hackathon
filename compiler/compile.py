@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Compile a deliberately restricted structured C++ kernel driver to Metadata.
 
-No compiler dependency is needed. Unsupported syntax is rejected, never skipped.
-See compiler/README.md for the supported subset and trusted contract boundary.
+Operator sources are analyzed offline with Clang. The structured driver parser
+and scalar expression path do not require a C++ compiler.
 """
 from __future__ import annotations
 
@@ -552,6 +552,12 @@ class Parser:
         for mode in ('reads', 'writes'):
             node[mode] = [{field: value if field == 'buffer' else substitute(value, args)
                            for field, value in region.items()} for region in contract[mode]]
+        # Write conflicts include both previous readers and writers. An equal
+        # read footprint adds no dependency; eliminate it after alias binding.
+        # Keep nonidentical reads, including a larger read through the same ptr.
+        node['reads'] = [r for i, r in enumerate(node['reads'])
+                         if r not in node['writes'] and r not in node['reads'][:i]]
+        node['writes'] = [r for i, r in enumerate(node['writes']) if r not in node['writes'][:i]]
         return [node]
 
     def for_loop(self):
@@ -805,9 +811,12 @@ def encode_metadata(document, encoding='auto'):
 
 
 def main(argv=None):
+    from infer_catalog import AnalysisError, add_arguments, infer_catalog
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('source', type=Path)
-    parser.add_argument('--catalog', required=True, type=Path)
+    parser.add_argument('--catalog', type=Path, help='explicit legacy contract input; default derives contracts from operator sources')
+    add_arguments(parser)
+    parser.add_argument('--catalog-output', type=Path, help='optional offline analysis report; runtime does not read it')
     parser.add_argument('-o', '--output', required=True, type=Path)
     parser.add_argument('--entry', default='block_cholesky')
     parser.add_argument('--json-debug', type=Path)
@@ -815,8 +824,20 @@ def main(argv=None):
                                                'binary', 'binary-zlib', 'lean', 'lean-deflate'),
                         default='auto', help='metadata container; auto chooses the smallest representation')
     opts = parser.parse_args(argv)
+    if opts.catalog and opts.operator_source:
+        parser.error('choose --operator-source or explicit legacy --catalog')
     try:
-        document = compile_source(opts.source.read_text(), opts.catalog.read_bytes(), opts.entry,
+        if opts.operator_source:
+            catalog = infer_catalog(opts.operator_source, opts.compiler, opts.include, opts.clang_arg, opts.operator)
+            catalog_bytes = json.dumps(catalog, sort_keys=True).encode()
+        elif opts.catalog:
+            catalog_bytes = opts.catalog.read_bytes()
+        else:
+            catalog_bytes = b'{"schema_version":1,"operators":{}}'
+        if opts.catalog_output:
+            opts.catalog_output.parent.mkdir(parents=True, exist_ok=True)
+            opts.catalog_output.write_text(json.dumps(json.loads(catalog_bytes), indent=2) + '\n')
+        document = compile_source(opts.source.read_text(), catalog_bytes, opts.entry,
                                   include_provenance=bool(opts.json_debug) or
                                   opts.encoding not in ('auto', 'lean', 'lean-deflate'))
         artifact = encode_metadata(document, opts.encoding)
@@ -829,7 +850,7 @@ def main(argv=None):
             opts.json_debug.write_text(json.dumps(document, indent=2, sort_keys=True) + '\n')
         print(f'compiled {opts.source}: {len(artifact)} bytes, operators={",".join(document["operators"])}', file=sys.stderr)
         return 0
-    except (OSError, UnicodeError, CompileError, RecursionError) as ex:
+    except (OSError, UnicodeError, CompileError, AnalysisError, RecursionError) as ex:
         print(f'compiler: {ex}', file=sys.stderr)
         return 1
 

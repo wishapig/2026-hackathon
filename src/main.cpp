@@ -337,11 +337,16 @@ void validate_task(const dag::Task &t, std::uint32_t n, std::uint32_t b, bool au
             throw std::runtime_error("unsupported madd alias");
     }
     if (audit) {
-        require_region(t.reads, "L", a, b, b, n);
+        const auto require_read = [&](std::size_t offset) {
+            for (const auto &r : t.writes)
+                if (region_equals(r, "L", offset, b, b, n)) return;
+            require_region(t.reads, "L", offset, b, b, n);
+        };
+        require_read(a);
         if (argc == 5)
-            require_region(t.reads, "L", static_cast<std::size_t>(t.args[1]), b, b, n);
+            require_read(static_cast<std::size_t>(t.args[1]));
         if (t.symbol == "madd")
-            require_region(t.reads, "L", c, b, b, n);
+            require_read(c);
         require_region(t.writes, "L", c, b, b, n);
     }
 }

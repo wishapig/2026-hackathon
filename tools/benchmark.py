@@ -731,7 +731,6 @@ def functional_algorithms(build, result_dir, env, timeout):
                 entry = {'name': name, 'kind': 'functional_only', 'performance_eligible': False,
                          'source': str(root / 'examples' / source),
                          'source_sha256': digest(root / 'examples' / source),
-                         'catalog_sha256': digest(root / 'examples/naive_catalog.json'),
                          'runs': [], 'stages': [], 'passed': False}
                 report['algorithms'].append(entry)
                 print('[functional-only: ' + name + ']', flush=True)
@@ -751,8 +750,7 @@ def functional_algorithms(build, result_dir, env, timeout):
                 try:
                     metadata = temp / (name + '.meta')
                     run_stage('compile', [sys.executable, root/'compiler/compile.py',
-                              root/'examples'/source, '--entry', name, '--catalog',
-                              root/'examples/naive_catalog.json', '-o', metadata], clean)
+                              root/'examples'/source, '--entry', name, '-o', metadata], clean)
                     entry.update(metadata_bytes=metadata.stat().st_size, metadata_sha256=digest(metadata))
                     inp = temp / (name + '.bin')
                     expected = []

@@ -69,13 +69,42 @@ target_include_directories(dag_estimate PRIVATE vendor/demo/include)
 add_executable(dag_check tools/check_result.cpp)
 target_include_directories(dag_check PRIVATE vendor/demo/include include)
 target_link_libraries(dag_check PRIVATE Threads::Threads)
+find_program(DAG_LLVM_COMPILER NAMES clang++ clang)
+if(NOT DAG_LLVM_COMPILER)
+  message(FATAL_ERROR "Offline operator analysis requires Clang; set DAG_LLVM_COMPILER")
+endif()
+set(DAG_OPERATOR_SOURCES
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/demo/src/base_kernels/kernels_impl.cpp;${CMAKE_CURRENT_SOURCE_DIR}/vendor/demo/src/base_kernels/kernels_public.cpp"
+  CACHE STRING "Operator implementation sources for offline Clang analysis")
+set(DAG_OPERATOR_INCLUDES
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/demo/include;${CMAKE_CURRENT_SOURCE_DIR}/vendor/demo/src/base_kernels"
+  CACHE STRING "Include directories for offline operator analysis")
+set(DAG_OPERATOR_CLANG_ARGS "" CACHE STRING "Extra Clang flags for offline operator analysis")
+set(operator_analysis_args --compiler "${DAG_LLVM_COMPILER}")
+foreach(source IN LISTS DAG_OPERATOR_SOURCES)
+  list(APPEND operator_analysis_args --operator-source "${source}")
+endforeach()
+foreach(directory IN LISTS DAG_OPERATOR_INCLUDES)
+  list(APPEND operator_analysis_args --include "${directory}")
+endforeach()
+foreach(flag IN LISTS DAG_OPERATOR_CLANG_ARGS)
+  list(APPEND operator_analysis_args "--clang-arg=${flag}")
+endforeach()
+set(operator_headers)
+foreach(directory IN LISTS DAG_OPERATOR_INCLUDES)
+  file(GLOB_RECURSE headers CONFIGURE_DEPENDS "${directory}/*.h" "${directory}/*.hpp" "${directory}/*.hh" "${directory}/*.inc")
+  list(APPEND operator_headers ${headers})
+endforeach()
 add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/block_cholesky.meta"
+  BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/catalog.generated.json"
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/compiler/compile.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/demo/src/baseline/block_cholesky.cpp"
-  --catalog "${CMAKE_CURRENT_SOURCE_DIR}/examples/catalog.json"
+  ${operator_analysis_args}
+  --catalog-output "${CMAKE_CURRENT_BINARY_DIR}/catalog.generated.json"
   --encoding "${DAG_METADATA_ENCODING}"
   -o "${CMAKE_CURRENT_BINARY_DIR}/block_cholesky.meta"
-  DEPENDS compiler/compile.py examples/catalog.json vendor/demo/src/baseline/block_cholesky.cpp
+  DEPENDS compiler/compile.py compiler/infer_catalog.py ${DAG_OPERATOR_SOURCES} ${operator_headers}
+          vendor/demo/src/baseline/block_cholesky.cpp
   VERBATIM)
 add_custom_target(metadata ALL DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/block_cholesky.meta")
 add_dependencies(dag_run metadata)
