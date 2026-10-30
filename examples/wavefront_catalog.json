@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "operators": {
+    "combine": {
+      "arguments": [
+        "pointer:L",
+        "pointer:L",
+        "pointer:L",
+        "int"
+      ],
+      "completion": "synchronous",
+      "reentrant": true,
+      "internal_threads": 1,
+      "reads": [
+        {
+          "buffer": "L",
+          "offset": "arg0",
+          "rows": 1,
+          "cols": 1,
+          "stride": "arg3"
+        },
+        {
+          "buffer": "L",
+          "offset": "arg1",
+          "rows": 1,
+          "cols": 1,
+          "stride": "arg3"
+        }
+      ],
+      "writes": [
+        {
+          "buffer": "L",
+          "offset": "arg2",
+          "rows": 1,
+          "cols": 1,
+          "stride": "arg3"
+        }
+      ]
+    }
+  }
+}

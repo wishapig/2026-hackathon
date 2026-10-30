@@ -1,0 +1,8 @@
+/build*/
+/__pycache__/
+**/__pycache__/
+*.bin
+*.out
+*.meta
+*.pyc
+/artifacts/

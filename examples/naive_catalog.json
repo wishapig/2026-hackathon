@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "provenance": "Native scalar expressions are lowered with compiler-defined exact element access contracts; no external scalar operator declarations are needed.",
+  "operators": {}
+}

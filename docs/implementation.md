@@ -1,0 +1,53 @@
+# 当前实现说明
+
+> **非规范文档**：项目唯一需求与验收依据见 [REQUIREMENTS.md](../REQUIREMENTS.md)。本页仅说明实现、使用方式、设计候选或历史验证；其中的约束性表述不能新增、覆盖或缩小规范要求。
+
+截至 2026-10-30，本项目已具备可构建的源码编译器、Metadata 解码与参数绑定、通用依赖图、并行运行时、公开算子适配、严格文件 I/O 和独立校验器。正式评委静态库与 Ubuntu 22.04 / Kunpeng-920 尚未验证；操作步骤见 [需求规范](../REQUIREMENTS.md)。
+
+本页描述现有代码。其他模块文档保留较完整的设计候选，不能据此声称候选全部实现。构建与运行命令见 [项目 README](../README.md)。
+
+后续收到的 [1.docx 原文](problem_statement.md) 与 demo/public20 存在输入输出协议差异：原题面记录没有 b；主程序和校验器现在可显式选择 public/original 两版，分块 original 模式的 b 必须由调用者显式提供。原文还指定 n=3～10000 及与真值“完全一致”；自动资源预算与残差验证不能直接证明所有参数组合及正式真值判定已全部满足。详见 [题面差异与模块 I/O](problem_alignment.md)。public20 仍为默认协议。
+
+## 实现与设计的对应
+
+| 环节 | 当前实现 | 尚未实现或能力边界 |
+| --- | --- | --- |
+| 源码前端 | [compile.py](../compiler/compile.py) 使用 Python 标准库解析严格结构化 C++ 子集，支持完整 demo，拒绝未建模语法 | 不是 Clang AST，不支持任意 C++ 或完整预处理器；具体限制见 [前端说明](../compiler/README.md) |
+| 算子契约 | 外部 catalog 指定 ABI 与矩形读写区域，调用点替换参数；符号用于查契约 | 契约为受信输入，哈希不证明访问声明正确；更换库需要核对 |
+| Metadata | 参数化 let/for/if/call/copy/zero_upper 程序、前缀表达式、展开的访问表达式 | 未采用完整 varint、表达式 DAG 去重或压缩后继编码 |
+| 参数绑定 | [metadata.cpp](../src/metadata.cpp) 解码、验证、受检求值，按 n/b 展开任务或原顺序流式执行 | 展开受资源与算术限制，不承诺无限规模 |
+| 依赖 | [graph.cpp](../src/graph.cpp) 按实际物理区域划分访问等价类，维护 last-writer/all-readers，构造 RAW/WAR/WAW 并去重为 CSR | 不是完全离线符号依赖求解或纯隐式后继；没有 Cholesky 专用后继公式 |
+| 并行执行 | [runtime.cpp](../src/runtime.cpp) 可复用线程池、线程本地队列/窃取、atomic 与 owner 两种后端、有界批处理、失败排空 | 未实现链压缩、窗口回收、JIT、复杂关键路径优先级或自动成本模型调参 |
+| 应用 | [main.cpp](../src/main.cpp) 真实调用公共 cholesky/trsm/madd，按顺序处理多 case，临时文件成功后 rename | 默认 blocked 模式仅绑定公共三算子；显式 scalar 模式绑定通用标量表达式；其他外部算子仍须自己的 ABI 适配器 |
+| 数值校验 | [check_result.cpp](../tools/check_result.cpp) 检查有限值、正对角线、残差及中间运算有限性 | 校验独立于计时程序；原始 public verifier 仍保留用于互操作验证 |
+
+共享接口集中在 [core.hpp](../include/dag/core.hpp)，没有按旧设计的 13 个模块拆成 13 个独立代码组件。examples 保留 wavefront 与朴素标量 Cholesky 源码样例；naive 样例现用普通矩阵元素算术，由 scalar 模式执行；wavefront 仍需新增 ABI 适配。缺失的官方朴素源码未作覆盖承诺。
+
+## 文件格式与参数语义
+
+Metadata 是 8 字节 `DAGMETA1`、uint64LE payload 长度、uint64LE FNV-1a 校验值，加 UTF-8 紧凑确定性 JSON。24 字节容器内保存 schema_version、source_digest、contract_digest、operators、program、frontend、parameter_guards。FNV 仅检测意外损坏，不认证来源。
+
+当前“隐式依赖表示”的语义是：对参数 p，程序树定义按源顺序排列的任务 T(p)，每个任务定义读写区域 R/W；任意先后任务 x、y 在 W(x)∩R(y)、R(x)∩W(y) 或 W(x)∩W(y) 非空时构成必须保持的冲突顺序。因而文件与通用解释规则共同确定所有参数实例的依赖，不需要算法专用后继公式。运行时区域版本算法用 last-writer/all-readers 构造保持这些冲突可达性的 CSR。
+
+这说明当前文件如何确定依赖，**不等同于离线求出了符号前驱/后继式**。按已有回复，Metadata 内容由方案决定，不额外设置直接关系式门槛；仍须如实说明上述源码与依赖表示的对应，不能以文件小或某些样本正确代替语义论证。
+
+当前构建产物大小：分块 Cholesky **1839 字节**、朴素 Cholesky **2186 字节**、wavefront **886 字节**。参数来自输入；同一 Metadata 绑定不同 n/b，不含 case、seed 或文件名特判及预存结果。
+
+解码检查长度、校验和、重复键、未知字段、深度与资源限制。严格前端标记启用受检源程序 32 位 int 语义；通用表达式另有受检 64 位求值。前端拒绝八进制/前导零整数、反斜杠换行、未知头文件和不支持的宏。只接受文档规定的受信、未修改头文件。
+
+保留非二次幂 b/q 支持。应用检查 n>0、b>0、n%b==0、块地址合法及 n*n<=INT_MAX，后者对应提供内核的 int 索引。合法实例仍需满足声明的资源预算与源程序整数定义域，不能将这些限制描述为任意整数规模支持。
+
+## 执行、计时与资源
+
+`DAG_MODE=serial` 原顺序流式执行，不建图。`parallel` 优先建图调度；`auto` 在任何算子执行前根据任务数不超过 `2*planned_workers` 选择小任务串行路径，显式单线程 auto 直接使用流式路径。展开/构图/执行器准备超出预算时，在任何数值操作前选择 serial-resource 流式路径；计算失败不会重放。默认不限制总任务数和求值次数，DAG_MAX_TASKS/DAG_MAX_STEPS 非零时为显式用户限制。
+
+并行路径中，第一任务若为 `__copy`，独立取出为前置阶段；最后任务若为 `__zero_upper`，独立取出为后置阶段。二者不要求同时存在；前置复制在建图及执行器执行存储准备完成后才执行。内部复制/清零保留原图语义，所有阶段均计时。
+
+总计时从配置、资源发现和 Metadata 加载前开始，到矩阵资源、线程池与 Metadata 必要收束后结束。只减去矩阵文件 I/O；Metadata 读取/解码、分配初始化、输入有限值扫描、复制、展开、建图、建池、计算、清零与必要释放均在内。case 之间不计算并发、不做准备流水；只读 Metadata 和线程池可复用，首次成本仍计入。
+
+`score_seconds` 是上述完整算法计时；`prepare_seconds` / `execute_seconds` 仅作诊断且串并行边界不同。报告格式化/写入发生在评分计时结束后。基准的 `process_wall_seconds` 是程序进程墙钟时间，独立校验在其后运行；不能把仅算子执行时间或 demo baseline 的较窄计时直接当作等价结果。
+
+NUMA CPU 集来自进程亲和集与 sysfs 节点列表的交集，选择第一个非空节点；拓扑不可用时退回一个允许 CPU。主线程与工作线程设置 CPU 亲和性，没有显式内存节点绑定。目标机需核对允许内存节点、继承策略和实际页位置，不将 socket 等同于节点。
+
+`DAG_MEMORY_MB` 未设时自动规划单 NUMA 可用内存、系统可用、进程/cgroup 剩余额度的最小值并保留 20% 余量，显式设置为额外上限。`DAG_GRAPH_MEMORY_MB` 默认 256，仅限制尝试物化图的存储，超限转流式，不拒绝整个合法实例。预算含矩阵、Metadata、任务/图、线程栈及按实际任务的算子绑定估计工作空间（demo trsm 为每 worker b*b doubles；无 trsm 的实例不作此预留）。它不是精确峰值 RSS 或系统级内存保留；正式库工作空间需重新核对。`graph_bytes` 是保留存储估算，不能报告为精确峰值 RSS。
+

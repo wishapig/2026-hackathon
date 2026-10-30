@@ -1,0 +1,11 @@
+{
+  "source": "1.docx",
+  "source_sha256": "207949d5af93b8b1125bebbeb4571815aa4cf6c6333f2a86c771d83f9bec9a2e",
+  "method": "Manual visual transcription of the four embedded screenshots; no machine-readable body text in DOCX.",
+  "images": {
+    "docs/assets/problem-original/image1.png": "82202a090208833f203246771cbeb5894b10be1bec604e4ad016c74508f0dbaf",
+    "docs/assets/problem-original/image2.png": "ab5a4f7fa26f32e9b938220b21bb7f67b9dc7a86afd794b8c651c37e4f62e995",
+    "docs/assets/problem-original/image3.png": "63f98b8a9d46748f91ba36914edc8d97e810c357aaa0dd540cd463035fa96315",
+    "docs/assets/problem-original/image4.png": "f8b6ddbfb4595df678bf5653cdd9b078855721c299e26f351d64031e517447ef"
+  }
+}

@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "provenance": "demo.zip local kernel source; final judge library requires revalidation",
+  "operators": {
+    "cholesky": {
+      "arguments": [
+        "pointer:L",
+        "pointer:L",
+        "int",
+        "int"
+      ],
+      "completion": "synchronous",
+      "reentrant": true,
+      "internal_threads": 1,
+      "reads": [
+        {
+          "buffer": "L",
+          "offset": "arg0",
+          "rows": "arg2",
+          "cols": "arg2",
+          "stride": "arg3"
+        }
+      ],
+      "writes": [
+        {
+          "buffer": "L",
+          "offset": "arg1",
+          "rows": "arg2",
+          "cols": "arg2",
+          "stride": "arg3"
+        }
+      ]
+    },
+    "trsm": {
+      "arguments": [
+        "pointer:L",
+        "pointer:L",
+        "pointer:L",
+        "int",
+        "int"
+      ],
+      "completion": "synchronous",
+      "reentrant": true,
+      "internal_threads": 1,
+      "reads": [
+        {
+          "buffer": "L",
+          "offset": "arg0",
+          "rows": "arg3",
+          "cols": "arg3",
+          "stride": "arg4"
+        },
+        {
+          "buffer": "L",
+          "offset": "arg1",
+          "rows": "arg3",
+          "cols": "arg3",
+          "stride": "arg4"
+        }
+      ],
+      "writes": [
+        {
+          "buffer": "L",
+          "offset": "arg2",
+          "rows": "arg3",
+          "cols": "arg3",
+          "stride": "arg4"
+        }
+      ]
+    },
+    "madd": {
+      "arguments": [
+        "pointer:L",
+        "pointer:L",
+        "pointer:L",
+        "int",
+        "int"
+      ],
+      "completion": "synchronous",
+      "reentrant": true,
+      "internal_threads": 1,
+      "reads": [
+        {
+          "buffer": "L",
+          "offset": "arg0",
+          "rows": "arg3",
+          "cols": "arg3",
+          "stride": "arg4"
+        },
+        {
+          "buffer": "L",
+          "offset": "arg1",
+          "rows": "arg3",
+          "cols": "arg3",
+          "stride": "arg4"
+        },
+        {
+          "buffer": "L",
+          "offset": "arg2",
+          "rows": "arg3",
+          "cols": "arg3",
+          "stride": "arg4"
+        }
+      ],
+      "writes": [
+        {
+          "buffer": "L",
+          "offset": "arg2",
+          "rows": "arg3",
+          "cols": "arg3",
+          "stride": "arg4"
+        }
+      ]
+    }
+  }
+}
