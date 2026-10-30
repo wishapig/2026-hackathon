@@ -74,6 +74,10 @@ struct ResourceLimit : std::runtime_error {
 Program load_metadata(const std::string &path, const Limits &limits = {});
 void enumerate_program(const Program &, Parameters, const Limits &,
                        const std::function<void(const Task &)> &);
+// Each callback is a completion barrier. Only windows proven pairwise
+// independent have parallel=true; their storage is valid during the callback.
+void enumerate_pattern(const Program &, Parameters, const Limits &,
+                       const std::function<void(const std::vector<Task> &, bool parallel)> &);
 std::vector<Task> instantiate(const Program &, Parameters, const Limits &);
 
 struct Graph {

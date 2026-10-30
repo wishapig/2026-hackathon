@@ -1078,15 +1078,16 @@ struct Evaluator {
         delta = static_cast<Int>(result);
         return true;
     }
-    bool pack_loop(BoundNode &loop, std::vector<Int> &values, Int first, Int last, Int step) {
-        if ((!limits.loop_parts && limits.loop_chunk <= 1) || limits.max_steps || loop.body.size() != 1 ||
+    bool pack_loop(BoundNode &loop, std::vector<Int> &values, Int first, Int last, Int step,
+                   std::size_t forced_parts = 0) {
+        if ((!forced_parts && !limits.loop_parts && limits.loop_chunk <= 1) || limits.max_steps || loop.body.size() != 1 ||
             loop.body[0].source->kind != Node::Kind::Call) return false;
         const auto trip128 = (static_cast<__int128>(last) - first + step - 1) / step;
         if (trip128 < 2 || trip128 > std::numeric_limits<std::size_t>::max()) return false;
         const auto trip = static_cast<std::size_t>(trip128);
         // No affine analysis or scratch copies when there is already at most
         // one iteration per desired part.
-        if (limits.loop_parts && trip <= limits.loop_parts) return false;
+        if (!forced_parts && limits.loop_parts && trip <= limits.loop_parts) return false;
         auto &call = loop.body[0];
         Task base = call.scratch;
         base.steps.assign(base.args.size() + base.reads.size() + base.writes.size(), 0);
@@ -1149,10 +1150,11 @@ struct Evaluator {
             for (const auto &r : *rs) region(r, values, endpoint);
         const auto after = checked(static_cast<__int128>(first) + trip128 * step);
         Task packed = base;
-        const auto part_size = limits.loop_parts ? trip / limits.loop_parts : 0;
-        const auto larger_parts = limits.loop_parts ? trip % limits.loop_parts : 0;
+        const auto parts = forced_parts ? std::min(forced_parts, trip) : limits.loop_parts;
+        const auto part_size = parts ? trip / parts : 0;
+        const auto larger_parts = parts ? trip % parts : 0;
         for (std::size_t begin = 0, part = 0; begin < trip; ++part) {
-            packed.repeat = limits.loop_parts ? part_size + (part < larger_parts)
+            packed.repeat = parts ? part_size + (part < larger_parts)
                                              : std::min(limits.loop_chunk, trip - begin);
             for (std::size_t a = 0; a < base.args.size(); ++a)
                 packed.args[a] = static_cast<Int>(static_cast<__int128>(base.args[a]) +
@@ -1392,6 +1394,264 @@ void execute_bound(const Program &program, BoundProgram &bound, Parameters p,
     e.run(bound.nodes, values);
 }
 
+using PatternEmitter = std::function<void(const std::vector<Task> &, bool)>;
+
+// Prove a rectangular superset of a two-dimensional call domain. The proof
+// uses only Metadata access expressions, never operator names or argument IDs.
+struct PatternEnumerator {
+    Evaluator &e;
+    std::vector<Int> &values;
+    const PatternEmitter &emit_window;
+    std::vector<Task> window;
+    std::size_t bytes = 0, capacity;
+    bool parallel = false;
+
+    PatternEnumerator(Evaluator &evaluator, std::vector<Int> &bindings,
+                      const PatternEmitter &emit)
+        : e(evaluator), values(bindings), emit_window(emit),
+          capacity(std::min<std::size_t>(1024, e.limits.memory_bytes / (4 * sizeof(Task)))) {
+        if (!capacity) throw ResourceLimit("pattern window exceeds memory budget");
+        window.reserve(capacity);
+    }
+    void flush() {
+        if (window.empty()) return;
+        emit_window(window, parallel);
+        window.clear();
+        bytes = 0;
+    }
+    void publish(const Task &task) {
+        std::size_t cost = sizeof(Task) + task.symbol.size() + 1 +
+                           (task.args.size() + task.steps.size()) * sizeof(Int);
+        for (const auto *regions : {&task.reads, &task.writes})
+            for (const auto &r : *regions) cost += sizeof(Region) + r.buffer.size() + 1;
+        const auto budget = e.limits.memory_bytes / 2;
+        if (cost > budget) throw ResourceLimit("pattern task exceeds memory budget");
+        if (window.size() == capacity || bytes > budget - cost) flush();
+        bytes += cost;
+        window.push_back(task);
+        if (!parallel) flush();
+    }
+    using Delta = std::array<Int, 2>;
+    bool affine_pair(const BoundExpr &x, const std::array<std::size_t, 2> &slots,
+                     const Delta &steps, Delta &out) {
+        out = {0, 0};
+        if (x.code == Code::Literal) return true;
+        if (x.code == Code::Variable) {
+            for (std::size_t d = 0; d < 2; ++d)
+                if (x.slot == slots[d]) out[d] = steps[d];
+            return true;
+        }
+        if (x.args.empty()) return false;
+        Delta a{}, b{};
+        if (!affine_pair(x.args[0], slots, steps, a)) return false;
+        const auto varies = [](const Delta &v) { return v[0] || v[1]; };
+        if (!varies(a) && (x.code == Code::And || x.code == Code::Or)) {
+            const auto left = e.eval(x.args[0], values);
+            if ((x.code == Code::And && !left) || (x.code == Code::Or && left)) return true;
+        }
+        if (x.args.size() > 1 && !affine_pair(x.args[1], slots, steps, b)) return false;
+        if (x.code == Code::Mul && varies(a) && varies(b)) return false;
+        Int factor_a = 0, factor_b = 0;
+        if (x.code == Code::Mul) {
+            if (varies(a)) factor_a = e.eval(x.args[1], values);
+            if (varies(b)) factor_b = e.eval(x.args[0], values);
+        }
+        for (std::size_t d = 0; d < 2; ++d) {
+            __int128 result = 0;
+            if (x.code == Code::Neg) result = -static_cast<__int128>(a[d]);
+            else if (x.code == Code::Add) result = static_cast<__int128>(a[d]) + b[d];
+            else if (x.code == Code::Sub) result = static_cast<__int128>(a[d]) - b[d];
+            else if (x.code == Code::Mul)
+                result = static_cast<__int128>(a[d]) * factor_a +
+                         static_cast<__int128>(b[d]) * factor_b;
+            else if (varies(a) || varies(b)) return false;
+            if (result < std::numeric_limits<Int>::min() ||
+                result > std::numeric_limits<Int>::max()) return false;
+            out[d] = static_cast<Int>(result);
+        }
+        return true;
+    }
+    struct Footprint {
+        Region region;
+        std::array<std::array<__int128, 2>, 2> shift{};
+        std::array<__int128, 2> origin{}, extent{}, end{};
+    };
+    bool independent_nest(BoundNode &outer, Int first, Int step,
+                          std::size_t trips) {
+        if (e.limits.max_steps || outer.body.size() != 1 ||
+            outer.body[0].source->kind != Node::Kind::For) return false;
+        auto &inner = outer.body[0];
+        if (inner.body.size() != 1 || inner.body[0].source->kind != Node::Kind::Call) return false;
+        values[outer.slot] = first;
+        Int start_delta = 0, stop_delta = 0, step_delta = 0;
+        if (!e.affine_delta(inner.start, outer.slot, step, values, start_delta) ||
+            !e.affine_delta(inner.stop, outer.slot, step, values, stop_delta) ||
+            !e.affine_delta(inner.step, outer.slot, step, values, step_delta) || step_delta ||
+            start_delta < 0) return false;
+        const auto inner_first = e.checked(e.eval(inner.start, values));
+        const auto inner_stop = e.eval(inner.stop, values);
+        if (inner_first >= inner_stop) return false;
+        const auto inner_step = e.eval(inner.step, values);
+        if (inner_step <= 0 || start_delta % inner_step) return false;
+        const auto outer_final = e.checked(static_cast<__int128>(first) +
+                                          static_cast<__int128>(trips - 1) * step);
+        values[outer.slot] = outer_final;
+        const auto final_first = e.checked(e.eval(inner.start, values));
+        const auto final_stop = e.eval(inner.stop, values);
+        if (final_first >= final_stop) return false;
+        const auto inner_span = (static_cast<__int128>(std::max(inner_stop, final_stop)) -
+                                 inner_first + inner_step - 1) / inner_step;
+        const std::array<__int128, 2> spans{static_cast<__int128>(trips), inner_span};
+        const std::array<std::size_t, 2> slots{outer.slot, inner.slot};
+        const Delta steps{step, inner_step};
+        values[outer.slot] = first;
+        values[inner.slot] = inner_first;
+        auto &call = inner.body[0];
+        std::vector<Footprint> regions;
+        regions.reserve(call.reads.size() + call.writes.size());
+        for (unsigned writing = 0; writing < 2; ++writing) {
+            const auto &source = writing ? call.writes : call.reads;
+            const auto &scratch = writing ? call.scratch.writes : call.scratch.reads;
+            for (std::size_t i = 0; i < source.size(); ++i) {
+                const auto &r = source[i];
+                Delta delta{};
+                for (const auto *field : {&r.rows, &r.cols, &r.stride})
+                    if (!affine_pair(*field, slots, steps, delta) || delta[0] || delta[1]) return false;
+                if (!affine_pair(r.offset, slots, steps, delta)) return false;
+                Footprint f;
+                f.region.buffer = scratch[i].buffer;
+                e.region(r, values, f.region);
+                const auto &region = f.region;
+                if (!region.stride) return false;
+                f.origin = {region.offset / region.stride, region.offset % region.stride};
+                f.extent = {region.rows, region.cols};
+                f.end = {f.origin[0] + region.rows, f.origin[1] + region.cols};
+                for (std::size_t d = 0; d < 2; ++d) {
+                    if (delta[d] < 0) return false;
+                    if (static_cast<std::size_t>(delta[d]) % region.stride == 0)
+                        f.shift[d][0] = static_cast<std::size_t>(delta[d]) / region.stride;
+                    else if (static_cast<std::size_t>(delta[d]) < region.stride)
+                        f.shift[d][1] = delta[d];
+                    else return false;
+                    for (std::size_t axis = 0; axis < 2; ++axis)
+                        f.end[axis] += (spans[d] - 1) * f.shift[d][axis];
+                }
+                if (f.end[1] > region.stride) return false;
+                regions.push_back(std::move(f));
+            }
+        }
+        for (std::size_t wi = call.reads.size(); wi < regions.size(); ++wi) {
+            const auto &w = regions[wi];
+            for (const auto &r : regions) {
+                if (w.region.buffer != r.region.buffer || !w.region.rows || !w.region.cols ||
+                    !r.region.rows || !r.region.cols) continue;
+                if (w.region.stride != r.region.stride) return false;
+                bool separate = false;
+                for (std::size_t axis = 0; axis < 2; ++axis)
+                    separate |= w.end[axis] <= r.origin[axis] || r.end[axis] <= w.origin[axis];
+                if (separate) continue;
+                // Otherwise an access can intersect only the same (outer,inner)
+                // iteration: each changing index has its own disjoint axis.
+                for (std::size_t d = 0; d < 2; ++d) {
+                    if (spans[d] <= 1) continue;
+                    bool aligned = false;
+                    for (std::size_t axis = 0; axis < 2; ++axis) {
+                        const auto stride = w.shift[d][axis];
+                        aligned |= stride > 0 && stride == r.shift[d][axis] &&
+                            w.origin[axis] == r.origin[axis] &&
+                            stride >= w.extent[axis] && stride >= r.extent[axis] &&
+                            !w.shift[1 - d][axis] && !r.shift[1 - d][axis];
+                    }
+                    if (!aligned) return false;
+                }
+            }
+        }
+        return true;
+    }
+    void run(std::vector<BoundNode> &nodes) {
+        for (auto &node : nodes) {
+            if (node.source->kind != Node::Kind::For && node.source->kind != Node::Kind::If) {
+                e.run_node(node, values);
+                continue;
+            }
+            e.tick();
+            if (node.source->kind == Node::Kind::If) {
+                run(e.eval(node.condition, values) ? node.body : node.otherwise);
+                continue;
+            }
+            const auto first = e.checked(e.eval(node.start, values));
+            const auto last = e.eval(node.stop, values);
+            if (first >= last) continue;
+            const auto step = e.eval(node.step, values);
+            if (step <= 0) throw std::runtime_error("nonpositive loop step");
+            const auto trips128 = (static_cast<__int128>(last) - first + step - 1) / step;
+            if (trips128 > std::numeric_limits<std::size_t>::max())
+                throw std::runtime_error("loop trip count overflow");
+            const auto trips = static_cast<std::size_t>(trips128);
+            for (auto *call : node.scope_calls) call->fields_initialized = false;
+            parallel = true;
+            const auto direct_parts = e.limits.loop_parts ? e.limits.loop_parts : capacity;
+            if (e.pack_loop(node, values, first, last, step, direct_parts)) {
+                flush();
+                parallel = false;
+                continue;
+            }
+            parallel = false;
+            if (independent_nest(node, first, step, trips)) {
+                auto &inner = node.body[0];
+                const auto desired = std::max<std::size_t>(e.limits.loop_parts, 1);
+                const auto parts = desired / trips + (desired % trips != 0);
+                parallel = true;
+                for (Int i = first; i < last;) {
+                    e.tick();
+                    values[node.slot] = i;
+                    e.tick();
+                    const auto begin = e.checked(e.eval(inner.start, values));
+                    const auto end = e.eval(inner.stop, values);
+                    const auto increment = e.eval(inner.step, values);
+                    for (auto *call : inner.scope_calls) call->fields_initialized = false;
+                    if (!e.pack_loop(inner, values, begin, end, increment, parts)) {
+                        for (Int j = begin; j < end;) {
+                            e.tick();
+                            values[inner.slot] = j;
+                            e.run_node(inner.body[0], values);
+                            j = e.checked(static_cast<__int128>(j) + increment);
+                        }
+                    }
+                    i = e.checked(static_cast<__int128>(i) + step);
+                }
+                flush();
+                parallel = false;
+                continue;
+            }
+            for (Int i = first; i < last;) {
+                e.tick();
+                values[node.slot] = i;
+                run(node.body);
+                i = e.checked(static_cast<__int128>(i) + step);
+            }
+        }
+    }
+};
+
+void execute_pattern(const Program &program, BoundProgram &bound, Parameters p,
+                     std::size_t elements, const Limits &limits, const PatternEmitter &emit_window) {
+    Limits remaining = limits;
+    remaining.memory_bytes -= bound.bytes;
+    std::vector<Int> values(bound.slots, 0);
+    values[0] = p.n;
+    values[1] = p.b;
+    PatternEnumerator *pattern = nullptr;
+    const std::function<void(const Task &)> emit = [&](const Task &task) { pattern->publish(task); };
+    Evaluator e{p, remaining, emit, 0, 0, elements, program.source_int32};
+    for (const auto &guard : bound.guards)
+        if (!e.eval(guard, values)) throw std::runtime_error("source parameter guard rejected input");
+    PatternEnumerator enumerator(e, values, emit_window);
+    pattern = &enumerator;
+    enumerator.run(bound.nodes);
+    enumerator.flush();
+}
+
 // Enumerate a proven outer-loop pattern one barrier window at a time.  The
 // current Metadata language does not carry an explicit dependence template;
 // the conservative proof used here is the lexical shape itself: exactly one
@@ -1487,6 +1747,12 @@ void enumerate_program_windows(const Program &program, Parameters p, const Limit
     const auto elements = parameter_elements(program, p);
     auto bound = Lowering{limits, {}}.lower(program);
     execute_bound_windows(program, bound, p, elements, limits, emit_window);
+}
+void enumerate_pattern(const Program &program, Parameters p, const Limits &limits,
+                       const std::function<void(const std::vector<Task> &, bool)> &emit_window) {
+    const auto elements = parameter_elements(program, p);
+    auto bound = Lowering{limits, {}}.lower(program);
+    execute_pattern(program, bound, p, elements, limits, emit_window);
 }
 std::vector<Task> instantiate(const Program &program, Parameters p, const Limits &limits) {
     const auto elements = parameter_elements(program, p);
