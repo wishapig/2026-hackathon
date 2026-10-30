@@ -19,6 +19,8 @@ from dataclasses import dataclass
 
 MAGIC = b'DAGMETA1'
 COMPRESSED_MAGIC = b'DAGMETA2'
+COMPACT_MAGIC = b'DAGMETA3'
+COMPACT_COMPRESSED_MAGIC = b'DAGMETA4'
 INT_MIN, INT_MAX = -(1 << 63), (1 << 63) - 1
 SOURCE_INT_MIN, SOURCE_INT_MAX = -(1 << 31), (1 << 31) - 1
 TRUSTED_INCLUDES = {'"kernels.h"', '<algorithm>', '<cmath>', '<cstddef>', '<stdexcept>', '<vector>'}
@@ -592,20 +594,85 @@ def compile_source(source: str, catalog_bytes: bytes, entry='block_cholesky'):
     }
 
 
+def compact_payload(document):
+    """Losslessly encode schema field positions; expressions remain unchanged."""
+    allowed = {'schema_version', 'source_digest', 'contract_digest', 'operators',
+               'program', 'parameter_guards', 'frontend'}
+    if set(document) - allowed or document.get('schema_version') != 1:
+        raise CompileError('compact metadata requires schema_version=1')
+    frontend = document.get('frontend')
+    if frontend not in (None, 'strict-structured-cpp-v1'):
+        raise CompileError('unsupported compact frontend semantics')
+
+    def regions(items):
+        fields = ('buffer', 'offset', 'rows', 'cols', 'stride')
+        result = []
+        for item in items:
+            if set(item) != set(fields):
+                raise CompileError('unexpected compact region fields')
+            result.append([item[field] for field in fields])
+        return result
+
+    def nodes(items):
+        result = []
+        for item in items:
+            kind = item['kind']
+            if kind == 'let':
+                fields = {'kind', 'name', 'value'}
+                packed = [0, item['name'], item['value']]
+            elif kind == 'for':
+                fields = {'kind', 'var', 'start', 'stop', 'step', 'body'}
+                packed = [1, item['var'], item['start'], item['stop'], item['step'],
+                          nodes(item['body'])]
+            elif kind == 'if':
+                fields = {'kind', 'condition', 'then', 'else'}
+                packed = [2, item['condition'], nodes(item['then']), nodes(item.get('else', []))]
+            elif kind == 'call':
+                fields = {'kind', 'op', 'args', 'reads', 'writes'}
+                packed = [3, item['op'], item['args'], regions(item['reads']), regions(item['writes'])]
+            elif kind in ('copy', 'zero_upper'):
+                fields = {'kind'}
+                packed = [4 if kind == 'copy' else 5]
+            else:
+                raise CompileError(f'unsupported compact node: {kind}')
+            if set(item) - fields:
+                raise CompileError('unexpected compact node fields')
+            result.append(packed)
+        return result
+
+    digests = bytearray()
+    for key in ('source_digest', 'contract_digest'):
+        value = document[key]
+        if not isinstance(value, str) or not re.fullmatch('[0-9a-f]{64}', value):
+            raise CompileError('compact metadata requires lowercase SHA-256 input digests')
+        digests.extend(bytes.fromhex(value))
+    packed = [document['operators'], document.get('parameter_guards', []),
+              int(frontend is not None), nodes(document['program'])]
+    return bytes(digests) + json.dumps(packed, ensure_ascii=True, separators=(',', ':')).encode()
+
+
 def encode_metadata(document, encoding='auto'):
-    payload = json.dumps(document, ensure_ascii=True, sort_keys=True, separators=(',', ':')).encode()
-    if encoding not in ('auto', 'raw', 'zlib'):
+    if encoding not in ('auto', 'raw', 'zlib', 'compact', 'compact-zlib'):
         raise CompileError(f'unknown metadata encoding: {encoding}')
-    stored = payload
-    magic = MAGIC
-    if encoding != 'raw':
-        compressed = zlib.compress(payload, level=9)
-        if encoding == 'zlib' or len(compressed) < len(payload):
-            stored = compressed
-            magic = COMPRESSED_MAGIC
-    # Both versions checksum the same uncompressed program bytes. The new
-    # version stores one complete zlib stream, without an external dictionary.
-    return magic + struct.pack('<QQ', len(payload), fnv1a(payload)) + stored
+    candidates = []
+
+    def append(magic, payload, compressed):
+        stored = zlib.compress(payload, level=9) if compressed else payload
+        candidates.append(magic + struct.pack('<QQ', len(payload), fnv1a(payload)) + stored)
+
+    if encoding in ('auto', 'raw', 'zlib'):
+        payload = json.dumps(document, ensure_ascii=True, sort_keys=True, separators=(',', ':')).encode()
+        if encoding != 'zlib':
+            append(MAGIC, payload, False)
+        if encoding != 'raw':
+            append(COMPRESSED_MAGIC, payload, True)
+    if encoding in ('auto', 'compact', 'compact-zlib'):
+        payload = compact_payload(document)
+        if encoding != 'compact-zlib':
+            append(COMPACT_MAGIC, payload, False)
+        if encoding != 'compact':
+            append(COMPACT_COMPRESSED_MAGIC, payload, True)
+    return min(candidates, key=len)
 
 
 def main(argv=None):
@@ -615,8 +682,8 @@ def main(argv=None):
     parser.add_argument('-o', '--output', required=True, type=Path)
     parser.add_argument('--entry', default='block_cholesky')
     parser.add_argument('--json-debug', type=Path)
-    parser.add_argument('--encoding', choices=('auto', 'raw', 'zlib'), default='auto',
-                        help='metadata container; auto chooses the smaller raw/zlib payload')
+    parser.add_argument('--encoding', choices=('auto', 'raw', 'zlib', 'compact', 'compact-zlib'),
+                        default='auto', help='metadata container; auto chooses the smallest representation')
     opts = parser.parse_args(argv)
     try:
         document = compile_source(opts.source.read_text(), opts.catalog.read_bytes(), opts.entry)

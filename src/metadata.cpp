@@ -232,6 +232,86 @@ class Parser {
         return j;
     }
 };
+// Fixed schema positions eliminate repeated field names, not program content.
+// Reconstruct the ordinary Json representation so every existing semantic check
+// remains shared by all container versions.
+const Json::Array &compact_array(const Json &j, std::size_t size) {
+    const auto &a = j.arr();
+    if (a.size() != size)
+        throw std::runtime_error("invalid compact metadata field count");
+    return a;
+}
+Json compact_regions(const Json &j) {
+    Json::Array result;
+    for (const auto &item : j.arr()) {
+        const auto &a = compact_array(item, 5);
+        result.push_back(Json{Json::Object{{"buffer", a[0]}, {"offset", a[1]},
+                                          {"rows", a[2]}, {"cols", a[3]}, {"stride", a[4]}}});
+    }
+    return Json{std::move(result)};
+}
+Json compact_nodes(const Json &j, unsigned depth = 0) {
+    if (depth > 32)
+        throw std::runtime_error("compact program nesting limit");
+    Json::Array result;
+    for (const auto &item : j.arr()) {
+        const auto &a = item.arr();
+        if (a.empty())
+            throw std::runtime_error("empty compact program node");
+        const auto tag = a[0].number();
+        const auto expected = tag == 0 ? 3u : tag == 1 ? 6u : tag == 2 ? 4u :
+                              tag == 3 ? 5u : (tag == 4 || tag == 5) ? 1u : 0u;
+        if (!expected || a.size() != expected)
+            throw std::runtime_error("invalid compact program tag or field count");
+        Json::Object node;
+        if (tag == 0) {
+            node = {{"kind", Json{std::string("let")}}, {"name", a[1]}, {"value", a[2]}};
+        } else if (tag == 1) {
+            node = {{"kind", Json{std::string("for")}}, {"var", a[1]}, {"start", a[2]},
+                    {"stop", a[3]}, {"step", a[4]}, {"body", compact_nodes(a[5], depth + 1)}};
+        } else if (tag == 2) {
+            node = {{"kind", Json{std::string("if")}}, {"condition", a[1]},
+                    {"then", compact_nodes(a[2], depth + 1)},
+                    {"else", compact_nodes(a[3], depth + 1)}};
+        } else if (tag == 3) {
+            node = {{"kind", Json{std::string("call")}}, {"op", a[1]}, {"args", a[2]},
+                    {"reads", compact_regions(a[3])}, {"writes", compact_regions(a[4])}};
+        } else {
+            node = {{"kind", Json{std::string(tag == 4 ? "copy" : "zero_upper")}}};
+        }
+        result.push_back(Json{std::move(node)});
+    }
+    return Json{std::move(result)};
+}
+Json compact_document(const std::string &payload, std::size_t maximum) {
+    if (payload.size() < 64)
+        throw std::runtime_error("truncated compact input digests");
+    const auto digest = [&](std::size_t offset) {
+        static constexpr char hex[] = "0123456789abcdef";
+        std::string result;
+        result.reserve(64);
+        for (std::size_t i = offset; i < offset + 32; ++i) {
+            const auto c = static_cast<unsigned char>(payload[i]);
+            result.push_back(hex[c >> 4]);
+            result.push_back(hex[c & 15]);
+        }
+        return result;
+    };
+    const auto body = payload.substr(64);
+    const auto parsed = Parser(body, maximum).parse();
+    const auto &a = compact_array(parsed, 4);
+    const auto frontend = a[2].number();
+    if (frontend != 0 && frontend != 1)
+        throw std::runtime_error("invalid compact frontend semantics");
+    Json::Object root{{"schema_version", Json{Int(1)}},
+                      {"source_digest", Json{digest(0)}},
+                      {"contract_digest", Json{digest(32)}},
+                      {"operators", a[0]}, {"parameter_guards", a[1]},
+                      {"program", compact_nodes(a[3])}};
+    if (frontend)
+        root.emplace("frontend", Json{std::string("strict-structured-cpp-v1")});
+    return Json{std::move(root)};
+}
 void keys(const Json &j, std::initializer_list<const char *> valid) {
     for (const auto &kv : j.obj()) {
         bool found = false;
@@ -602,7 +682,9 @@ Program load_metadata(const std::string &path, const Limits &limits) {
     if (!in)
         throw std::runtime_error("truncated metadata header");
     const std::string magic(reinterpret_cast<char *>(h.data()), 8);
-    if (magic != "DAGMETA1" && magic != "DAGMETA2")
+    const bool compressed = magic == "DAGMETA2" || magic == "DAGMETA4";
+    const bool compact = magic == "DAGMETA3" || magic == "DAGMETA4";
+    if (magic != "DAGMETA1" && !compressed && !compact)
         throw std::runtime_error("metadata magic/version mismatch");
     const auto length = little(h.data() + 8);
     const auto stored_length = static_cast<std::uint64_t>(size) - 24;
@@ -611,7 +693,7 @@ Program load_metadata(const std::string &path, const Limits &limits) {
     if (length > limits.memory_bytes / 32)
         throw ResourceLimit("decoded metadata exceeds memory budget");
     std::string payload;
-    if (magic == "DAGMETA1") {
+    if (!compressed) {
         if (length != stored_length)
             throw std::runtime_error("metadata length mismatch");
         payload.resize(static_cast<std::size_t>(length));
@@ -652,7 +734,8 @@ Program load_metadata(const std::string &path, const Limits &limits) {
     }
     if (hash != little(h.data() + 16))
         throw std::runtime_error("metadata checksum mismatch");
-    Json root = Parser(payload, limits.memory_bytes / 256).parse();
+    Json root = compact ? compact_document(payload, limits.memory_bytes / 512)
+                        : Parser(payload, limits.memory_bytes / 256).parse();
     keys(root, {"schema_version", "source_digest", "contract_digest", "operators", "program",
                 "frontend", "parameter_guards"});
     if (root.at("schema_version").number() != 1)

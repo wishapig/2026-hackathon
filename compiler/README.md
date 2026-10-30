@@ -100,17 +100,21 @@ requires a declared catalog and an explicit application ABI adapter.
 
 ## Artifact contract
 
-Both container versions begin with an 8-byte magic, little-endian uint64 decoded
+All container versions begin with an 8-byte magic, little-endian uint64 decoded
 payload byte length, and little-endian uint64 FNV-1a checksum of the decoded payload:
 
 - `DAGMETA1`: the remaining bytes are deterministic compact UTF-8 JSON.
 - `DAGMETA2`: the remaining bytes are exactly one zlib stream containing that JSON;
   no external dictionary or algorithm-specific information is needed.
+- `DAGMETA3`: the payload contains two raw 32-byte SHA-256 digests (source, catalog),
+  followed by compact positional JSON as described below.
+- `DAGMETA4`: exactly one zlib stream containing the `DAGMETA3` payload.
 
-The compiler defaults to `--encoding auto`, which picks whichever payload is
-smaller. `--encoding raw` and `--encoding zlib` select explicit comparison
+The compiler defaults to `--encoding auto`, which picks the smallest of the four
+containers. `--encoding raw`, `--encoding zlib`, `--encoding compact` and
+`--encoding compact-zlib` select explicit comparison
 variants. CMake exposes the same choice as `DAG_METADATA_ENCODING`. The runtime
-accepts both versions and requires zlib >= 1.2.9 (Ubuntu package `zlib1g-dev` for
+accepts all four versions and requires zlib >= 1.2.9 (Ubuntu package `zlib1g-dev` for
 building). Decompression checks the declared output size and memory budget before
 allocation, and rejects truncated data, trailing bytes/streams and mismatched
 lengths. Loading and decompression stay inside the scored computation interval.
@@ -119,6 +123,28 @@ FNV-1a detects
 accidental corruption, not malicious modification or authentic provenance.
 SHA-256 source and catalog digests identify the inputs. Optional `--json-debug`
 writes readable redundant diagnostics; execution requires only the `.meta` file.
+
+Compact positional JSON fixes only schema field positions. Its root is
+`[operators, parameter_guards, frontend, program]`; frontend is 0 (generic checked
+int64) or 1 (`strict-structured-cpp-v1`). Each node is one of:
+
+```text
+[0, name, value]                         # let
+[1, var, start, stop, step, body]         # for
+[2, condition, then_nodes, else_nodes]   # if
+[3, op, args, reads, writes]             # call
+[4]                                    # copy
+[5]                                    # zero_upper
+```
+
+A region is `[buffer, offset, rows, cols, stride]`. Expressions, variable names,
+operator names, access regions and input digests are preserved; there is no
+algorithm-specific dictionary or implicit task graph. Container versions 3/4
+imply schema version 1. The decoder reconstructs the ordinary representation and
+runs the same semantic validation as versions 1/2; positional arrays require
+exact field counts. A more conservative parser budget accounts for this temporary
+reconstruction. The container checksum covers the decoded binary digests and
+positional JSON together.
 
 JSON has schema_version=1, source_digest, contract_digest, operators (symbol
 strings), and program. Expressions are integer literals, variable-name strings,
