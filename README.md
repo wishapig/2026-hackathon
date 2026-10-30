@@ -20,7 +20,7 @@ python3 tools/benchmark.py accept-public20
 
 ## 构建与运行
 
-依赖 Linux、CMake 3.16+、C++17、Python 3.9+ 和 pthreads。默认链接 demo 内核。
+依赖 Linux、CMake 3.16+、C++17、Python 3.9+、pthreads 和 zlib >=1.2.9（Ubuntu 包 zlib1g-dev）。默认链接 demo 内核。
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -36,7 +36,7 @@ DAG_METADATA="$PWD/build/block_cholesky.meta" DAG_THREADS=0 DAG_MODE=auto \
 
 内存默认根据单 NUMA 可用估算、进程/cgroup 剩余和系统可用内存的最小值规划，并留 20% 余量；`DAG_MEMORY_MB` 可显式限制上限，校验器对应 `DAG_CHECK_MEMORY_MB`。这是资源快照，不是 OS 内存保留。无法发现单节点容量时要求显式设置预算。
 
-`DAG_GRAPH_MEMORY_MB` 默认 256，仅限制尝试完整构图的存储。任务展开、建图或执行器准备资源不足时，`auto`/`parallel` 都在复制和任何数值调用前改为流式执行，报告标为 `serial-resource`；已经开始计算则绝不重放。该路径省内存，未承诺与并行同速。`DAG_MAX_TASKS`/`DAG_MAX_STEPS` 默认 0（不设总量上限），非零是用户主动限制，达到后明确失败，不静默绕过。
+`DAG_GRAPH_MEMORY_MB` 未设置或为0时，根据每个case扣除矩阵、Metadata、线程池和实际算子工作空间后的预算自动规划；正值仅作为额外图预算上限，不覆盖实际资源限制。任务展开、建图或执行器准备资源不足时，`auto`/`parallel` 都在复制和任何数值调用前改为流式执行，报告标为 `serial-resource`，并写入 `resource_limited`、原因、阶段和有效图预算；已经开始计算则绝不重放。该路径省内存，未承诺与并行同速。`DAG_MAX_TASKS`/`DAG_MAX_STEPS` 默认 0（不设总量上限），非零是用户主动限制，达到后明确失败，不静默绕过。
 
 `DAG_STATS_FILE` 可指定统计 JSON；`COMPILER2026_TIMING_FILE` 可指定完整计算秒数文件。只有矩阵文件 I/O 从运行时间扣除，校验由独立程序完成。
 
@@ -91,3 +91,19 @@ cmake --build build-judge -j 8
 正式环境使用真实评委归档，重新运行上述端到端性能入口并选择 `build-judge` 下的程序、Metadata 和校验器。外部链接配置只说明链接路径，不能认证库来源。目标是 Ubuntu 22.04 / Kunpeng-920 的实际获准单 NUMA 资源。
 
 源码子集和 Metadata 格式见 [编译器说明](compiler/README.md)，实际模块见 [模块输入输出](docs/problem_alignment.md)。
+
+## 比赛候选与干净部署
+
+候选commit、配置、Metadata大小、完整性能和验收证据见根目录 [GOAL.md](GOAL.md) 的Pareto台账。每个 `pareto/Pxxx` 标签指向实际被测实现，证据在 `results/pareto/Pxxx/`。本地宿主成绩不等于正式目标机成绩。
+
+benchmark默认清除继承的DAG实验设置，显式CLI参数再覆盖；`--inherit-env` 才保留继承配置。部署也可使用同一工具的干净入口，子程序仍只接收两个文件参数：
+
+```bash
+python3 tools/benchmark.py submit build/dag_run input.bin output.bin \
+  --metadata build/block_cholesky.meta \
+  --configuration-report artifacts/submission-config.json
+```
+
+该入口默认自动线程与预算，避免把本地16线程或低内存限制带到目标机。确有目标资源限制时通过 `--threads`、`--memory-mb`、`--graph-memory-mb` 明确指定，OS亲和集/cgroup限制始终有效。
+
+资源回退的原始耗时保留，但不进入算法完整性能汇总；共同有效case诊断单独列出覆盖率和排除原因，不能冒充完整公开集成绩。可在相同输入、硬件资源和算子库条件下执行 `python3 tools/benchmark.py compare-reports report-a.json report-b.json --report comparison.json`，只比较共同有效case。

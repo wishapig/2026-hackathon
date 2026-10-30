@@ -25,7 +25,7 @@
 
 ## 文件格式与参数语义
 
-Metadata 是 8 字节 `DAGMETA1`、uint64LE payload 长度、uint64LE FNV-1a 校验值，加 UTF-8 紧凑确定性 JSON。24 字节容器内保存 schema_version、source_digest、contract_digest、operators、program、frontend、parameter_guards。FNV 仅检测意外损坏，不认证来源。
+Metadata 兼容原始 `DAGMETA1`，默认自动选择更小的 `DAGMETA2` zlib压缩容器。两者均保留完整参数化语义及原载荷校验，解码有大小、流结束与预算检查。原始格式是 8 字节 `DAGMETA1`、uint64LE payload 长度、uint64LE FNV-1a 校验值，加 UTF-8 紧凑确定性 JSON。24 字节容器内保存 schema_version、source_digest、contract_digest、operators、program、frontend、parameter_guards。FNV 仅检测意外损坏，不认证来源。
 
 当前“隐式依赖表示”的语义是：对参数 p，程序树定义按源顺序排列的任务 T(p)，每个任务定义读写区域 R/W；任意先后任务 x、y 在 W(x)∩R(y)、R(x)∩W(y) 或 W(x)∩W(y) 非空时构成必须保持的冲突顺序。因而文件与通用解释规则共同确定所有参数实例的依赖，不需要算法专用后继公式。运行时区域版本算法用 last-writer/all-readers 构造保持这些冲突可达性的 CSR。
 
@@ -39,7 +39,7 @@ Metadata 是 8 字节 `DAGMETA1`、uint64LE payload 长度、uint64LE FNV-1a 校
 
 ## 执行、计时与资源
 
-`DAG_MODE=serial` 原顺序流式执行，不建图。`parallel` 优先建图调度；`auto` 在任何算子执行前根据任务数不超过 `2*planned_workers` 选择小任务串行路径，显式单线程 auto 直接使用流式路径。展开/构图/执行器准备超出预算时，在任何数值操作前选择 serial-resource 流式路径；计算失败不会重放。默认不限制总任务数和求值次数，DAG_MAX_TASKS/DAG_MAX_STEPS 非零时为显式用户限制。
+`DAG_MODE=serial` 原顺序流式执行，不建图。`parallel` 优先建图调度；`auto` 在任何算子执行前根据实际数值调用数及估计算子工作量选择小任务串行路径（单次数值调用，或少量且轻量的调用），显式单线程 auto 直接使用流式路径。展开/构图/执行器准备超出预算时，在任何数值操作前选择 serial-resource 流式路径；计算失败不会重放。默认不限制总任务数和求值次数，DAG_MAX_TASKS/DAG_MAX_STEPS 非零时为显式用户限制。
 
 并行路径中，第一任务若为 `__copy`，独立取出为前置阶段；最后任务若为 `__zero_upper`，独立取出为后置阶段。二者不要求同时存在；前置复制在建图及执行器执行存储准备完成后才执行。内部复制/清零保留原图语义，所有阶段均计时。
 
@@ -49,5 +49,5 @@ Metadata 是 8 字节 `DAGMETA1`、uint64LE payload 长度、uint64LE FNV-1a 校
 
 NUMA CPU 集来自进程亲和集与 sysfs 节点列表的交集，选择第一个非空节点；拓扑不可用时退回一个允许 CPU。主线程与工作线程设置 CPU 亲和性，没有显式内存节点绑定。目标机需核对允许内存节点、继承策略和实际页位置，不将 socket 等同于节点。
 
-`DAG_MEMORY_MB` 未设时自动规划单 NUMA 可用内存、系统可用、进程/cgroup 剩余额度的最小值并保留 20% 余量，显式设置为额外上限。`DAG_GRAPH_MEMORY_MB` 默认 256，仅限制尝试物化图的存储，超限转流式，不拒绝整个合法实例。预算含矩阵、Metadata、任务/图、线程栈及按实际任务的算子绑定估计工作空间（demo trsm 为每 worker b*b doubles；无 trsm 的实例不作此预留）。它不是精确峰值 RSS 或系统级内存保留；正式库工作空间需重新核对。`graph_bytes` 是保留存储估算，不能报告为精确峰值 RSS。
+`DAG_MEMORY_MB` 未设时自动规划单 NUMA 可用内存、系统可用、进程/cgroup 剩余额度的最小值并保留 20% 余量，显式设置为额外上限。`DAG_GRAPH_MEMORY_MB` 未设置或0时按case剩余预算自动规划，正值作为额外上限，超限转流式，不拒绝整个合法实例。预算含矩阵、Metadata、任务/图、线程栈及按实际任务的算子绑定估计工作空间（demo trsm 为每 worker b*b doubles；无 trsm 的实例不作此预留）。它不是精确峰值 RSS 或系统级内存保留；正式库工作空间需重新核对。`graph_bytes` 是保留存储估算，不能报告为精确峰值 RSS。
 
