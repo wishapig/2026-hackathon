@@ -16,6 +16,12 @@ if(DAG_SANITIZE AND DAG_TSAN)
 endif()
 find_package(Threads REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+find_package(ZLIB 1.2.9 REQUIRED)
+set(DAG_METADATA_ENCODING "auto" CACHE STRING "Metadata payload encoding: auto, raw, or zlib")
+set_property(CACHE DAG_METADATA_ENCODING PROPERTY STRINGS auto raw zlib)
+if(NOT DAG_METADATA_ENCODING MATCHES "^(auto|raw|zlib)$")
+  message(FATAL_ERROR "DAG_METADATA_ENCODING must be auto, raw, or zlib")
+endif()
 add_compile_options(-Wall -Wextra -Wconversion -Wshadow -fno-lto -fno-fast-math)
 add_link_options(-fno-lto)
 if(DAG_SANITIZE)
@@ -28,7 +34,7 @@ if(DAG_TSAN)
 endif()
 add_library(dag_runtime STATIC src/metadata.cpp src/graph.cpp src/runtime.cpp)
 target_include_directories(dag_runtime PUBLIC include)
-target_link_libraries(dag_runtime PUBLIC Threads::Threads)
+target_link_libraries(dag_runtime PUBLIC Threads::Threads ZLIB::ZLIB)
 if(DAG_OFFICIAL_LIBRARY)
   if(NOT EXISTS "${DAG_OFFICIAL_LIBRARY}")
     message(FATAL_ERROR "Official library does not exist")
@@ -61,6 +67,7 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/block_cholesky.meta"
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/compiler/compile.py"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/demo/src/baseline/block_cholesky.cpp"
   --catalog "${CMAKE_CURRENT_SOURCE_DIR}/examples/catalog.json"
+  --encoding "${DAG_METADATA_ENCODING}"
   -o "${CMAKE_CURRENT_BINARY_DIR}/block_cholesky.meta"
   DEPENDS compiler/compile.py examples/catalog.json vendor/demo/src/baseline/block_cholesky.cpp
   VERBATIM)

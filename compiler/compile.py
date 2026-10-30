@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile a deliberately restricted structured C++ kernel driver to DAGMETA1.
+"""Compile a deliberately restricted structured C++ kernel driver to Metadata.
 
 No compiler dependency is needed. Unsupported syntax is rejected, never skipped.
 See compiler/README.md for the supported subset and trusted contract boundary.
@@ -14,9 +14,11 @@ from pathlib import Path
 import re
 import struct
 import sys
+import zlib
 from dataclasses import dataclass
 
 MAGIC = b'DAGMETA1'
+COMPRESSED_MAGIC = b'DAGMETA2'
 INT_MIN, INT_MAX = -(1 << 63), (1 << 63) - 1
 SOURCE_INT_MIN, SOURCE_INT_MAX = -(1 << 31), (1 << 31) - 1
 TRUSTED_INCLUDES = {'"kernels.h"', '<algorithm>', '<cmath>', '<cstddef>', '<stdexcept>', '<vector>'}
@@ -590,9 +592,20 @@ def compile_source(source: str, catalog_bytes: bytes, entry='block_cholesky'):
     }
 
 
-def encode_metadata(document):
+def encode_metadata(document, encoding='auto'):
     payload = json.dumps(document, ensure_ascii=True, sort_keys=True, separators=(',', ':')).encode()
-    return MAGIC + struct.pack('<QQ', len(payload), fnv1a(payload)) + payload
+    if encoding not in ('auto', 'raw', 'zlib'):
+        raise CompileError(f'unknown metadata encoding: {encoding}')
+    stored = payload
+    magic = MAGIC
+    if encoding != 'raw':
+        compressed = zlib.compress(payload, level=9)
+        if encoding == 'zlib' or len(compressed) < len(payload):
+            stored = compressed
+            magic = COMPRESSED_MAGIC
+    # Both versions checksum the same uncompressed program bytes. The new
+    # version stores one complete zlib stream, without an external dictionary.
+    return magic + struct.pack('<QQ', len(payload), fnv1a(payload)) + stored
 
 
 def main(argv=None):
@@ -602,10 +615,12 @@ def main(argv=None):
     parser.add_argument('-o', '--output', required=True, type=Path)
     parser.add_argument('--entry', default='block_cholesky')
     parser.add_argument('--json-debug', type=Path)
+    parser.add_argument('--encoding', choices=('auto', 'raw', 'zlib'), default='auto',
+                        help='metadata container; auto chooses the smaller raw/zlib payload')
     opts = parser.parse_args(argv)
     try:
         document = compile_source(opts.source.read_text(), opts.catalog.read_bytes(), opts.entry)
-        artifact = encode_metadata(document)
+        artifact = encode_metadata(document, opts.encoding)
         opts.output.parent.mkdir(parents=True, exist_ok=True)
         temp = opts.output.with_name(opts.output.name + '.tmp')
         temp.write_bytes(artifact)

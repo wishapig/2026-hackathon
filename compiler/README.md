@@ -100,8 +100,22 @@ requires a declared catalog and an explicit application ABI adapter.
 
 ## Artifact contract
 
-`DAGMETA1` (8 bytes), little-endian uint64 payload byte length, little-endian uint64
-FNV-1a payload checksum, then deterministic compact UTF-8 JSON. FNV-1a detects
+Both container versions begin with an 8-byte magic, little-endian uint64 decoded
+payload byte length, and little-endian uint64 FNV-1a checksum of the decoded payload:
+
+- `DAGMETA1`: the remaining bytes are deterministic compact UTF-8 JSON.
+- `DAGMETA2`: the remaining bytes are exactly one zlib stream containing that JSON;
+  no external dictionary or algorithm-specific information is needed.
+
+The compiler defaults to `--encoding auto`, which picks whichever payload is
+smaller. `--encoding raw` and `--encoding zlib` select explicit comparison
+variants. CMake exposes the same choice as `DAG_METADATA_ENCODING`. The runtime
+accepts both versions and requires zlib >= 1.2.9 (Ubuntu package `zlib1g-dev` for
+building). Decompression checks the declared output size and memory budget before
+allocation, and rejects truncated data, trailing bytes/streams and mismatched
+lengths. Loading and decompression stay inside the scored computation interval.
+
+FNV-1a detects
 accidental corruption, not malicious modification or authentic provenance.
 SHA-256 source and catalog digests identify the inputs. Optional `--json-debug`
 writes readable redundant diagnostics; execution requires only the `.meta` file.

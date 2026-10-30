@@ -7,6 +7,7 @@
 #include <set>
 #include <utility>
 #include <variant>
+#include <zlib.h>
 
 namespace dag {
 namespace {
@@ -597,15 +598,48 @@ Program load_metadata(const std::string &path, const Limits &limits) {
     in.seekg(0);
     std::array<unsigned char, 24> h{};
     in.read(reinterpret_cast<char *>(h.data()), 24);
-    if (std::string(reinterpret_cast<char *>(h.data()), 8) != "DAGMETA1")
-        throw std::runtime_error("metadata magic/version mismatch");
-    auto length = little(h.data() + 8);
-    if (length != static_cast<std::uint64_t>(size) - 24)
-        throw std::runtime_error("metadata length mismatch");
-    std::string payload(static_cast<std::size_t>(length), '\0');
-    in.read(payload.data(), static_cast<std::streamsize>(length));
     if (!in)
-        throw std::runtime_error("truncated metadata");
+        throw std::runtime_error("truncated metadata header");
+    const std::string magic(reinterpret_cast<char *>(h.data()), 8);
+    if (magic != "DAGMETA1" && magic != "DAGMETA2")
+        throw std::runtime_error("metadata magic/version mismatch");
+    const auto length = little(h.data() + 8);
+    const auto stored_length = static_cast<std::uint64_t>(size) - 24;
+    if (length > std::min<std::size_t>(64ull * 1024 * 1024, limits.memory_bytes / 32))
+        throw std::runtime_error("decoded metadata size/budget violation");
+    std::string payload;
+    if (magic == "DAGMETA1") {
+        if (length != stored_length)
+            throw std::runtime_error("metadata length mismatch");
+        payload.resize(static_cast<std::size_t>(length));
+        in.read(payload.data(), static_cast<std::streamsize>(length));
+        if (!in)
+            throw std::runtime_error("truncated metadata");
+    } else {
+        // The declared decoded length is checked before allocation. uncompress2
+        // additionally reports input consumption, so trailing bytes and appended
+        // streams cannot be accepted as an otherwise valid artifact.
+        if (!length || !stored_length ||
+            length > std::numeric_limits<uLongf>::max() ||
+            stored_length > std::numeric_limits<uLong>::max())
+            throw std::runtime_error("invalid compressed metadata length");
+        constexpr std::size_t inflate_reserve = 128 * 1024;
+        if (limits.memory_bytes < inflate_reserve ||
+            length > limits.memory_bytes - inflate_reserve ||
+            stored_length > limits.memory_bytes - inflate_reserve - length)
+            throw std::runtime_error("compressed metadata workspace exceeds memory budget");
+        std::string stored(static_cast<std::size_t>(stored_length), '\0');
+        in.read(stored.data(), static_cast<std::streamsize>(stored_length));
+        if (!in)
+            throw std::runtime_error("truncated compressed metadata");
+        payload.resize(static_cast<std::size_t>(length));
+        auto decoded = static_cast<uLongf>(length);
+        auto consumed = static_cast<uLong>(stored_length);
+        const int status = uncompress2(reinterpret_cast<Bytef *>(payload.data()), &decoded,
+                                       reinterpret_cast<const Bytef *>(stored.data()), &consumed);
+        if (status != Z_OK || decoded != length || consumed != stored_length)
+            throw std::runtime_error("invalid compressed metadata stream or length");
+    }
     std::uint64_t hash = 14695981039346656037ull;
     for (unsigned char c : payload) {
         hash ^= c;
