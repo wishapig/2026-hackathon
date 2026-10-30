@@ -1,0 +1,41 @@
+{
+  "commits": {
+    "baseline": "3429b75d70adb417588f0ecd6c583f32ba6abaa6",
+    "buffer": "9d542e621e80727a516d09c223b00030f7747222",
+    "scope": "d78ec8a134f2e7e94c378a73cdec5c3012c19f08"
+  },
+  "sampling": "round0 discarded as warmup, rounds1..5 measured fresh processes; order rotated/reversed; exclusive scoring",
+  "metadata_bytes": 141,
+  "seconds": {
+    "baseline": [
+      0.285059662,
+      0.29088521,
+      0.27840519900000005,
+      0.27749776000000004,
+      0.269647602
+    ],
+    "buffer": [
+      0.27756247300000003,
+      0.279765045,
+      0.278908873,
+      0.27398695800000006,
+      0.271354387
+    ],
+    "scope": [
+      0.276049696,
+      0.28334893,
+      0.27421479400000004,
+      0.27655446600000005,
+      0.274660654
+    ]
+  },
+  "median_seconds": {
+    "baseline": 0.27840519900000005,
+    "buffer": 0.27756247300000003,
+    "scope": 0.276049696
+  },
+  "scope_acceptance_gap": "Scope had direct temporary numerical and functional checks only; formal accept-public20 with retained report remains pending. No Pareto tag before that gate.",
+  "decision": "Small favorable estimates with overlapping variability; evaluate combination independently, retain fallback.",
+  "coverage": "20/20 all reports, no resource exclusions",
+  "environment": "local x86-64 demo only"
+}
