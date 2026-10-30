@@ -154,5 +154,7 @@
   "limitations": [
     "Formal judge archive and target machine unavailable",
     "Finite sampled correctness; not exhaustive shape proof"
-  ]
+  ],
+  "interleaved_revalidation": "../revalidation-20261030/P005.json",
+  "dominance_note": "P004/P005 retained: speed noise overlaps; baseline remains historical fallback, smaller/faster successors observed"
 }

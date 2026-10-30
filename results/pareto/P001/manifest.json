@@ -65,5 +65,7 @@
   "limitations": [
     "Formal judge library and target machine unavailable",
     "Original fixed 256 MiB graph ceiling; baseline only, not R25-complete"
-  ]
+  ],
+  "interleaved_revalidation": "../revalidation-20261030/P001.json",
+  "dominance_note": "P004/P005 retained: speed noise overlaps; baseline remains historical fallback, smaller/faster successors observed"
 }

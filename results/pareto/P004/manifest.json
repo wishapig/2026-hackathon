@@ -120,5 +120,7 @@
   "limitations": [
     "Formal target validation unavailable",
     "All coverage is sampled; no claim exhaustive valid input domain"
-  ]
+  ],
+  "interleaved_revalidation": "../revalidation-20261030/P004.json",
+  "dominance_note": "P004/P005 retained: speed noise overlaps; baseline remains historical fallback, smaller/faster successors observed"
 }

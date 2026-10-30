@@ -155,6 +155,8 @@ manifest 至少包括：源码 commit、benchmark 工具版本、输入/规格/�
 | P004 | 0b9a05223a7b9d7a9257235a496103758536d6be | 本地x86-64/demo | Release; portable-default auto/atomic/0线程/batch1 | 292 | 0.27243709000000005 | [证据](results/pareto/P004/manifest.json) | 已验收；当前领先，交错复测待确认 |
 | P005 | bbdc09e83747952d9f36948819668e115269d4d6 | 本地x86-64/demo | Release; portable-default auto/atomic/0线程/batch1 | 257 | 0.280835369 | [证据](results/pareto/P005/manifest.json) | 已验收；体积最小，与P004交错复测待定 |
 
+交错复测见 [2026-10-30 对照](results/pareto/revalidation-20261030/order.json)：P001 0.484026138秒/1839B，P004 0.289482860秒/292B，P005 0.295530587秒/257B；输入、数值库和硬件相同，P001保持原16线程配置、P004/P005自动资源。P004/P005时间范围重叠，保持两者为候选；P005体积更小，P004暂有较低中位数，不能宣称其中一个稳健支配另一个。原报告及原始round样本均保留。
+
 第一条记录应是经过本轮确认的基线；若测量时已被另一合格版本支配，仍在证据中保留其 baseline 身份，但不宣称它属于当前前沿。
 
 ## 统一 benchmark 与验收入口
