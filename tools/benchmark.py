@@ -34,6 +34,7 @@ HELPER_CONTROLS = {'SPD_GENERATOR_THREADS', 'VERIFIER_THREADS'}
 RESOURCE_OPTIONS = {
     'memory_mb': 'DAG_MEMORY_MB', 'graph_memory_mb': 'DAG_GRAPH_MEMORY_MB',
     'max_tasks': 'DAG_MAX_TASKS', 'max_steps': 'DAG_MAX_STEPS',
+    'output_locality': 'DAG_OUTPUT_LOCALITY',
     'check_memory_mb': 'DAG_CHECK_MEMORY_MB', 'check_threads': 'DAG_CHECK_THREADS',
     'block_size': 'DAG_BLOCK_SIZE', 'block_sizes': 'DAG_BLOCK_SIZES',
 }
