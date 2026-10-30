@@ -272,7 +272,7 @@ struct Executor::Impl {
         --q.count;
         return id;
     }
-    void decrement(unsigned publisher, std::uint32_t target) {
+    bool ready_after_decrement(std::uint32_t target) {
         std::uint32_t old;
         if (options.backend == "atomic")
             old = remaining[target].fetch_sub(1, std::memory_order_acq_rel);
@@ -283,7 +283,10 @@ struct Executor::Impl {
         }
         if (!old)
             throw std::runtime_error("duplicate dependency notification or counter underflow");
-        if (old == 1)
+        return old == 1;
+    }
+    void decrement(unsigned publisher, std::uint32_t target) {
+        if (ready_after_decrement(target))
             push(publisher, target);
     }
     void send(unsigned owner, std::size_t edge) {
@@ -335,13 +338,29 @@ struct Executor::Impl {
     void work(unsigned worker) {
         const auto n = graph->tasks.size();
         unsigned idle_rounds = 0, round_robin = worker;
+        // Keep at most one ready successor local. The last acq_rel decrement
+        // already acquires all predecessor writes, so a same-thread successor
+        // does not need an extra queue round trip for memory synchronization.
+        std::size_t continuation = none;
         while (!failed.load(std::memory_order_acquire) &&
                completed.load(std::memory_order_acquire) < n) {
             const auto generation = wake_sequence.load(std::memory_order_acquire);
             bool progress = options.backend == "owner" ? poll(worker) : false;
             for (unsigned batch = 0; batch < options.batch; ++batch) {
-                // Periodically take the oldest task even on the owner to prevent LIFO starvation.
-                auto id = pop(worker, ((round_robin++) % 32) == 0);
+                // Periodically publish the continuation and take the oldest
+                // task, preserving the queue's existing anti-starvation rule.
+                const bool oldest = ((round_robin++) % 32) == 0;
+                std::size_t id;
+                if (continuation != none && !oldest) {
+                    id = continuation;
+                    continuation = none;
+                } else {
+                    if (continuation != none) {
+                        push(worker, continuation);
+                        continuation = none;
+                    }
+                    id = pop(worker, oldest);
+                }
                 if (id == none) {
                     for (unsigned k = 1; k < workers; ++k) {
                         const auto other = (worker + k + (round_robin % workers)) % workers;
@@ -373,9 +392,15 @@ struct Executor::Impl {
                 (*invoke)(graph->tasks[id]);
                 for (auto e = graph->offsets[id]; e < graph->offsets[id + 1]; ++e) {
                     const auto target = graph->successors[e];
-                    if (options.backend == "atomic")
-                        decrement(worker, target);
-                    else {
+                    if (options.backend == "atomic") {
+                        if (ready_after_decrement(target)) {
+                            // Match local LIFO ordering: retain the newest
+                            // successor, publish earlier ones for other workers.
+                            if (continuation != none)
+                                push(worker, continuation);
+                            continuation = target;
+                        }
+                    } else {
                         const auto owner = target % workers;
                         if (owner == worker)
                             decrement(worker, target);
