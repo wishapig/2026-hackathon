@@ -539,9 +539,9 @@ int main(int argc, char **argv) {
                 static_cast<std::uint64_t>(std::numeric_limits<int>::max()))
                 throw std::runtime_error("matrix dimension exceeds official int indexing range");
             const auto elements = static_cast<std::size_t>(n) * n;
-            // Reuse adjacent equal shapes, without retaining a larger previous
-            // allocation when the next case shrinks or grows.
-            if (a.size() != elements) {
+            // Reuse touched capacity across shape changes. Growth beyond either
+            // buffer releases the old pair before allocating a replacement.
+            if (elements > a.capacity() || elements > l.capacity()) {
                 std::vector<double>().swap(a);
                 std::vector<double>().swap(l);
             }
@@ -551,31 +551,48 @@ int main(int argc, char **argv) {
             consumed_bytes += elements * sizeof(double);
             if (elements > (memory - metadata_reserve) / sizeof(double) / 2)
                 throw dag::ResourceLimit("matrix buffers exceed memory budget");
-            const auto matrix_bytes = std::max(elements, a.capacity()) * sizeof(double) +
-                                      std::max(elements, l.capacity()) * sizeof(double);
-            if (matrix_bytes > memory - metadata_reserve)
-                throw dag::ResourceLimit("retained matrix capacity exceeds memory budget");
             const auto auxiliary = stats.capacity() * sizeof(CaseStats) +
                                    block_sizes.capacity() * sizeof(std::uint32_t);
-            if (auxiliary > memory - metadata_reserve - matrix_bytes)
-                throw dag::ResourceLimit("application memory budget exhausted");
-            // Refresh headroom for this case. The probe reports future capacity,
-            // so add back our already retained allocations before comparing it
-            // with the process-wide ceiling; do not subtract them twice.
-            const auto retained_matrices = (a.capacity() + l.capacity()) * sizeof(double);
-            const auto managed = metadata_reserve + auxiliary + retained_runtime_bytes + retained_matrices;
-            const auto fresh = dag::available_memory_budget(requested_memory, permitted_cpus);
-            const auto fresh_total = fresh > std::numeric_limits<std::size_t>::max() - managed
-                ? std::numeric_limits<std::size_t>::max() : fresh + managed;
-            const auto case_total = std::min(memory, fresh_total);
-            if (metadata_reserve > case_total || matrix_bytes > case_total - metadata_reserve ||
-                auxiliary > case_total - metadata_reserve - matrix_bytes)
-                throw dag::ResourceLimit("current available memory cannot fit matrix buffers");
-            const auto case_budget = case_total - metadata_reserve - matrix_bytes - auxiliary;
-            if (case_budget < 4096)
-                throw dag::ResourceLimit("matrix buffers leave insufficient execution memory");
-            limits.memory_bytes = case_budget;
-            diagnosed_case_budget = case_budget;
+            std::size_t case_budget = 0;
+            const auto spare_matrix_capacity = [&] {
+                return a.capacity() > elements || l.capacity() > elements;
+            };
+            const auto refresh_case_budget = [&] {
+                const auto matrix_bytes = std::max(elements, a.capacity()) * sizeof(double) +
+                                          std::max(elements, l.capacity()) * sizeof(double);
+                if (matrix_bytes > memory - metadata_reserve)
+                    throw dag::ResourceLimit("retained matrix capacity exceeds memory budget");
+                if (auxiliary > memory - metadata_reserve - matrix_bytes)
+                    throw dag::ResourceLimit("application memory budget exhausted");
+                // Charge actual retained capacity, and add managed storage back
+                // to the probe's future headroom without counting it twice.
+                const auto retained_matrices = (a.capacity() + l.capacity()) * sizeof(double);
+                const auto managed = metadata_reserve + auxiliary + retained_runtime_bytes +
+                                     retained_matrices;
+                const auto fresh = dag::available_memory_budget(requested_memory, permitted_cpus);
+                const auto fresh_total = fresh > std::numeric_limits<std::size_t>::max() - managed
+                    ? std::numeric_limits<std::size_t>::max() : fresh + managed;
+                const auto case_total = std::min(memory, fresh_total);
+                if (metadata_reserve > case_total || matrix_bytes > case_total - metadata_reserve ||
+                    auxiliary > case_total - metadata_reserve - matrix_bytes)
+                    throw dag::ResourceLimit("current available memory cannot fit matrix buffers");
+                case_budget = case_total - metadata_reserve - matrix_bytes - auxiliary;
+                if (case_budget < 4096)
+                    throw dag::ResourceLimit("matrix buffers leave insufficient execution memory");
+                limits.memory_bytes = case_budget;
+                diagnosed_case_budget = case_budget;
+            };
+            try {
+                refresh_case_budget();
+            } catch (const dag::ResourceLimit &) {
+                if (!spare_matrix_capacity())
+                    throw;
+                // The payload has not been read yet, so discard the optional
+                // cache before deciding that the next case cannot fit.
+                std::vector<double>().swap(a);
+                std::vector<double>().swap(l);
+                refresh_case_budget();
+            }
             const auto workspace = [&](const dag::Task &task) -> std::size_t {
                 // ABI workspace estimates belong to the operator binding, not
                 // to an algorithm formula. The demo's only block scratch is trsm.
@@ -592,11 +609,19 @@ int main(int argc, char **argv) {
                 executor.reset();
                 retained_runtime_bytes = 0;
             }
+            if (stream && spare_matrix_capacity()) {
+                // Streaming cannot retry preparation after its first store.
+                // Give it the exact-sized buffers used before capacity reuse.
+                std::vector<double>().swap(a);
+                std::vector<double>().swap(l);
+                refresh_case_budget();
+            }
             resource_stage = "matrix-allocation";
-            if (a.empty()) {
-                a.resize(elements);
-                l.resize(elements);
-            } else if (program.nodes.empty() || program.nodes.front().kind != dag::Node::Kind::Copy) {
+            const bool reused_output = !l.empty();
+            a.resize(elements);
+            l.resize(elements);
+            if (reused_output &&
+                (program.nodes.empty() || program.nodes.front().kind != dag::Node::Kind::Copy)) {
                 // Preserve the original zero-initialized output semantics unless
                 // the first semantic action provably overwrites the full buffer.
                 std::fill(l.begin(), l.end(), 0.0);
@@ -613,8 +638,8 @@ int main(int argc, char **argv) {
             };
             if (!stream) {
                 const auto prep_start = Clock::now();
-                bool numerical_started = false;
-                const auto fallback = [&](const char *reason) {
+                bool numerical_started = false, trimmed_matrices = false;
+                const auto retry_or_fallback = [&](const char *reason) {
                     // The failed candidate has unwound before memory is reused.
                     // Never replay after copy, a public call, or any scalar store.
                     if (numerical_started)
@@ -624,136 +649,158 @@ int main(int argc, char **argv) {
                     st.tasks = st.edges = st.steals = st.phase_tasks = 0;
                     st.graph_bytes = 0;
                     st.workers = 1;
+                    if (!trimmed_matrices && spare_matrix_capacity()) {
+                        trimmed_matrices = true;
+                        resource_stage = "matrix-cache-reclaim";
+                        // L is still untouched by the algorithm. Release it
+                        // before copying input into exact logical storage:
+                        // old A + new A fits within old A + old L capacity.
+                        std::vector<double>().swap(l);
+                        if (a.capacity() > elements)
+                            std::vector<double>(a.begin(), a.end()).swap(a);
+                        l.resize(elements);
+                        refresh_case_budget();
+                        st.case_memory_budget_bytes = case_budget;
+                        return true;
+                    }
                     st.execution_mode = "serial-resource";
                     st.resource_limited = true;
                     st.resource_reason = reason;
                     st.resource_stage = resource_stage;
                     st.prepare = elapsed(prep_start);
                     stream = true;
+                    return false;
                 };
-                try {
-                    if (executor)
-                        executor->set_memory_budget(case_budget);
-                    retained_runtime_bytes = executor ? executor->reserved_bytes() : 0;
-                    if (retained_runtime_bytes >= case_budget)
-                        throw dag::ResourceLimit("retained executor exceeds preparation budget");
-                    dag::Limits preparation_limits = limits;
-                    // Reserve worker stacks before expansion, even on the first case.
-                    // The runtime supplies its own reservation formula; do not bake
-                    // this host's worker count or a fixed graph capacity into it.
-                    const auto desired_pool = std::max(retained_runtime_bytes,
-                        dag::Executor::minimum_reserved_bytes(planned_workers));
-                    // A tiny instance may select serial execution and need no
-                    // pool at all. Defer a pool-capacity failure until that
-                    // decision is known; account existing allocations regardless.
-                    const auto pool_reserve = desired_pool < case_budget
-                        ? desired_pool : retained_runtime_bytes;
-                    const auto cap_graph = [&](std::size_t available) {
-                        return graph_budget ? std::min(graph_budget, available) : available;
-                    };
-                    // Expansion does not invoke kernels. Their scratch is only
-                    // reserved after the actual bound calls are known; a symbol
-                    // in the catalog need not execute for this shape.
-                    preparation_limits.memory_bytes = cap_graph(case_budget - pool_reserve);
-                    st.effective_graph_budget_bytes = preparation_limits.memory_bytes;
-                    diagnosed_effective_graph = preparation_limits.memory_bytes;
-                    resource_stage = "task-expansion";
-                    // This bounded speculative expansion stops as soon as its
-                    // representation no longer fits. It never runs numerical work.
-                    auto tasks = dag::instantiate(program, {n, b}, preparation_limits);
-                    resource_stage = "task-validation";
-                    std::size_t scratch_per_worker = 0, numerical_calls = 0;
-                    long double work_units = 0;
-                    for (const auto &task : tasks) {
-                        validate_task(task, n, b, options.audit);
-                        scratch_per_worker = std::max(scratch_per_worker, workspace(task));
-                        if (task.symbol != "__copy" && task.symbol != "__zero_upper") {
-                            ++numerical_calls;
-                            const long double cube = static_cast<long double>(b) * b * b;
-                            if (task.symbol == "cholesky") work_units += cube / 3;
-                            else if (task.symbol == "trsm") work_units += cube;
-                            else if (task.symbol == "madd") work_units += 2 * cube;
-                            else work_units += task.args.size();
-                        }
-                    }
-                    // Few calls can still be expensive: more available cores
-                    // must not turn a heavy DAG into a serial computation.
-                    if (mode == "auto" && (numerical_calls <= 1 ||
-                        (numerical_calls <= 2 * static_cast<std::size_t>(planned_workers) &&
-                         work_units <= 1048576.0L))) {
-                        resource_stage = "serial-small-execution";
-                        st.execution_mode = "serial-small-workload";
-                        st.prepare = elapsed(prep_start);
-                        const auto exec_start = Clock::now();
-                        numerical_started = true;
-                        for (const auto &task : tasks) {
-                            kernel(task);
-                            ++st.tasks;
-                        }
-                        st.execute = elapsed(exec_start);
-                    } else {
-                        resource_stage = "parallel-workspace";
-                        st.execution_mode = "parallel";
-                        if (scratch_per_worker > case_budget / planned_workers)
-                            throw dag::ResourceLimit("parallel kernel workspace exceeds memory budget");
-                        const auto parallel_budget = case_budget - scratch_per_worker * planned_workers;
+                for (;;) {
+                    try {
                         if (executor)
-                            executor->set_memory_budget(parallel_budget);
-                        std::optional<dag::Task> pre_stage, post_stage;
-                        if (!tasks.empty() && tasks.front().symbol == "__copy") {
-                            pre_stage = std::move(tasks.front());
-                            tasks.erase(tasks.begin());
-                            ++st.phase_tasks;
-                        }
-                        if (!tasks.empty() && tasks.back().symbol == "__zero_upper") {
-                            post_stage = std::move(tasks.back());
-                            tasks.pop_back();
-                            ++st.phase_tasks;
-                        }
-                        resource_stage = "worker-pool";
-                        if (!executor) {
-                            if (dag::Executor::minimum_reserved_bytes(planned_workers) >= parallel_budget)
-                                throw dag::ResourceLimit("worker reservation exceeds parallel budget");
-                            options.memory_bytes = parallel_budget;
-                            executor = std::make_unique<dag::Executor>(options);
-                        }
-                        retained_runtime_bytes = executor->reserved_bytes();
-                        if (retained_runtime_bytes >= parallel_budget)
-                            throw dag::ResourceLimit("executor exceeds graph preparation budget");
-                        preparation_limits.memory_bytes =
-                            cap_graph(parallel_budget - retained_runtime_bytes);
+                            executor->set_memory_budget(case_budget);
+                        retained_runtime_bytes = executor ? executor->reserved_bytes() : 0;
+                        if (retained_runtime_bytes >= case_budget)
+                            throw dag::ResourceLimit("retained executor exceeds preparation budget");
+                        dag::Limits preparation_limits = limits;
+                        // Reserve worker stacks before expansion, even on the first case.
+                        // The runtime supplies its own reservation formula; do not bake
+                        // this host's worker count or a fixed graph capacity into it.
+                        const auto desired_pool = std::max(retained_runtime_bytes,
+                            dag::Executor::minimum_reserved_bytes(planned_workers));
+                        // A tiny instance may select serial execution and need no
+                        // pool at all. Defer a pool-capacity failure until that
+                        // decision is known; account existing allocations regardless.
+                        const auto pool_reserve = desired_pool < case_budget
+                            ? desired_pool : retained_runtime_bytes;
+                        const auto cap_graph = [&](std::size_t available) {
+                            return graph_budget ? std::min(graph_budget, available) : available;
+                        };
+                        // Expansion does not invoke kernels. Their scratch is only
+                        // reserved after the actual bound calls are known; a symbol
+                        // in the catalog need not execute for this shape.
+                        preparation_limits.memory_bytes = cap_graph(case_budget - pool_reserve);
                         st.effective_graph_budget_bytes = preparation_limits.memory_bytes;
                         diagnosed_effective_graph = preparation_limits.memory_bytes;
-                        resource_stage = "graph-construction";
-                        auto graph = dag::build_graph(std::move(tasks), preparation_limits);
-                        if (options.audit)
-                            dag::validate_graph(graph);
-                        executor->set_memory_budget(parallel_budget);
-                        st.prepare = elapsed(prep_start);
-                        st.graph_bytes = graph.memory_bytes;
-                        resource_stage = "execution-storage";
-                        auto result = executor->run(graph, kernel, [&] {
-                            resource_stage = "parallel-execution";
-                            numerical_started = true;
-                            if (pre_stage)
-                                kernel(*pre_stage);
-                        });
-                        st.tasks = result.tasks + st.phase_tasks;
-                        st.edges = result.edges;
-                        st.steals = result.steals;
-                        st.workers = result.workers;
-                        st.execute = result.execute_seconds;
-                        if (post_stage) {
-                            const auto post_start = Clock::now();
-                            kernel(*post_stage);
-                            st.execute += elapsed(post_start);
+                        resource_stage = "task-expansion";
+                        // This bounded speculative expansion stops as soon as its
+                        // representation no longer fits. It never runs numerical work.
+                        auto tasks = dag::instantiate(program, {n, b}, preparation_limits);
+                        resource_stage = "task-validation";
+                        std::size_t scratch_per_worker = 0, numerical_calls = 0;
+                        long double work_units = 0;
+                        for (const auto &task : tasks) {
+                            validate_task(task, n, b, options.audit);
+                            scratch_per_worker = std::max(scratch_per_worker, workspace(task));
+                            if (task.symbol != "__copy" && task.symbol != "__zero_upper") {
+                                ++numerical_calls;
+                                const long double cube = static_cast<long double>(b) * b * b;
+                                if (task.symbol == "cholesky") work_units += cube / 3;
+                                else if (task.symbol == "trsm") work_units += cube;
+                                else if (task.symbol == "madd") work_units += 2 * cube;
+                                else work_units += task.args.size();
+                            }
                         }
-                        retained_runtime_bytes = executor->reserved_bytes();
+                        // Few calls can still be expensive: more available cores
+                        // must not turn a heavy DAG into a serial computation.
+                        if (mode == "auto" && (numerical_calls <= 1 ||
+                            (numerical_calls <= 2 * static_cast<std::size_t>(planned_workers) &&
+                             work_units <= 1048576.0L))) {
+                            if (scratch_per_worker > case_budget - 4096)
+                                throw dag::ResourceLimit("kernel workspace exceeds available execution memory");
+                            resource_stage = "serial-small-execution";
+                            st.execution_mode = "serial-small-workload";
+                            st.prepare = elapsed(prep_start);
+                            const auto exec_start = Clock::now();
+                            numerical_started = true;
+                            for (const auto &task : tasks) {
+                                kernel(task);
+                                ++st.tasks;
+                            }
+                            st.execute = elapsed(exec_start);
+                        } else {
+                            resource_stage = "parallel-workspace";
+                            st.execution_mode = "parallel";
+                            if (scratch_per_worker > case_budget / planned_workers)
+                                throw dag::ResourceLimit("parallel kernel workspace exceeds memory budget");
+                            const auto parallel_budget = case_budget - scratch_per_worker * planned_workers;
+                            if (executor)
+                                executor->set_memory_budget(parallel_budget);
+                            std::optional<dag::Task> pre_stage, post_stage;
+                            if (!tasks.empty() && tasks.front().symbol == "__copy") {
+                                pre_stage = std::move(tasks.front());
+                                tasks.erase(tasks.begin());
+                                ++st.phase_tasks;
+                            }
+                            if (!tasks.empty() && tasks.back().symbol == "__zero_upper") {
+                                post_stage = std::move(tasks.back());
+                                tasks.pop_back();
+                                ++st.phase_tasks;
+                            }
+                            resource_stage = "worker-pool";
+                            if (!executor) {
+                                if (dag::Executor::minimum_reserved_bytes(planned_workers) >= parallel_budget)
+                                    throw dag::ResourceLimit("worker reservation exceeds parallel budget");
+                                options.memory_bytes = parallel_budget;
+                                executor = std::make_unique<dag::Executor>(options);
+                            }
+                            retained_runtime_bytes = executor->reserved_bytes();
+                            if (retained_runtime_bytes >= parallel_budget)
+                                throw dag::ResourceLimit("executor exceeds graph preparation budget");
+                            preparation_limits.memory_bytes =
+                                cap_graph(parallel_budget - retained_runtime_bytes);
+                            st.effective_graph_budget_bytes = preparation_limits.memory_bytes;
+                            diagnosed_effective_graph = preparation_limits.memory_bytes;
+                            resource_stage = "graph-construction";
+                            auto graph = dag::build_graph(std::move(tasks), preparation_limits);
+                            if (options.audit)
+                                dag::validate_graph(graph);
+                            executor->set_memory_budget(parallel_budget);
+                            st.prepare = elapsed(prep_start);
+                            st.graph_bytes = graph.memory_bytes;
+                            resource_stage = "execution-storage";
+                            auto result = executor->run(graph, kernel, [&] {
+                                resource_stage = "parallel-execution";
+                                numerical_started = true;
+                                if (pre_stage)
+                                    kernel(*pre_stage);
+                            });
+                            st.tasks = result.tasks + st.phase_tasks;
+                            st.edges = result.edges;
+                            st.steals = result.steals;
+                            st.workers = result.workers;
+                            st.execute = result.execute_seconds;
+                            if (post_stage) {
+                                const auto post_start = Clock::now();
+                                kernel(*post_stage);
+                                st.execute += elapsed(post_start);
+                            }
+                            retained_runtime_bytes = executor->reserved_bytes();
+                        }
+                        break;
+                    } catch (const dag::ResourceLimit &error) {
+                        if (!retry_or_fallback(error.what()))
+                            break;
+                    } catch (const std::bad_alloc &error) {
+                        if (!retry_or_fallback(error.what()))
+                            break;
                     }
-                } catch (const dag::ResourceLimit &error) {
-                    fallback(error.what());
-                } catch (const std::bad_alloc &error) {
-                    fallback(error.what());
                 }
             }
             if (stream) {
