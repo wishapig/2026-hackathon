@@ -54,6 +54,7 @@ def add_controls(parser, default_mode='auto', public_only=False):
     parser.add_argument('--backend', choices=['atomic', 'owner'])
     parser.add_argument('--loop-chunk', type=int)
     parser.add_argument('--loop-parts', type=int)
+    parser.add_argument('--schedule', choices=['auto', 'graph', 'pattern'])
     if not public_only:
         parser.add_argument('--io-format', choices=['public', 'original'])
         parser.add_argument('--application', choices=['blocked', 'scalar'])
@@ -90,6 +91,10 @@ def execution_environment(args, parser):
                 parser.error('--' + attr.replace('_', '-') + ' must be nonnegative')
             env[key] = str(value)
             explicit[key] = str(value)
+    schedule = getattr(args, 'schedule', None)
+    if schedule is not None:
+        env['DAG_SCHEDULE'] = schedule
+        explicit['DAG_SCHEDULE'] = schedule
     for attr, key in RESOURCE_OPTIONS.items():
         value = getattr(args, attr)
         if value is not None:

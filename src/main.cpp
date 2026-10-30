@@ -435,6 +435,7 @@ struct CaseStats {
     std::string resource_reason, resource_stage;
     std::size_t effective_graph_budget_bytes = 0;
     std::size_t case_memory_budget_bytes = 0;
+    std::size_t pattern_windows = 0, peak_window_tasks = 0;
 };
 void write_text(const std::string &path, const std::string &value) {
     if (path.empty())
@@ -513,6 +514,9 @@ int main(int argc, char **argv) {
         if (options.backend != "atomic" && options.backend != "owner")
             throw std::runtime_error("DAG_BACKEND must be atomic or owner");
         options.audit = number("DAG_AUDIT", 0, 1) != 0;
+        const auto schedule = env("DAG_SCHEDULE", "auto");
+        if (schedule != "auto" && schedule != "graph" && schedule != "pattern")
+            throw std::runtime_error("DAG_SCHEDULE must be auto, graph, or pattern");
         const auto memory_mb =
             number("DAG_MEMORY_MB", 0, std::numeric_limits<std::size_t>::max() / (1024 * 1024));
         if (!memory_mb && !env("DAG_MEMORY_MB").empty())
@@ -799,6 +803,52 @@ int main(int argc, char **argv) {
                         st.effective_graph_budget_bytes = preparation_limits.memory_bytes;
                         diagnosed_effective_graph = preparation_limits.memory_bytes;
                         resource_stage = "task-expansion";
+                        if (!scalar_application && schedule != "graph" && !limits.max_steps) {
+                            resource_stage = "pattern-workspace";
+                            const auto scratch = static_cast<std::size_t>(b) * b * sizeof(double);
+                            if (scratch > case_budget / planned_workers)
+                                throw dag::ResourceLimit("parallel kernel workspace exceeds memory budget");
+                            const auto parallel_budget = case_budget - scratch * planned_workers;
+                            if (!executor) {
+                                options.memory_bytes = parallel_budget;
+                                executor = std::make_unique<dag::Executor>(options);
+                            } else executor->set_memory_budget(parallel_budget);
+                            retained_runtime_bytes = executor->reserved_bytes();
+                            if (retained_runtime_bytes >= parallel_budget)
+                                throw dag::ResourceLimit("executor exceeds pattern preparation budget");
+                            preparation_limits.memory_bytes = cap_graph(parallel_budget - retained_runtime_bytes);
+                            if (auto_loop_compression) preparation_limits.loop_parts = planned_workers;
+                            st.effective_graph_budget_bytes = preparation_limits.memory_bytes;
+                            diagnosed_effective_graph = preparation_limits.memory_bytes;
+                            st.execution_mode = "parallel-pattern";
+                            st.workers = planned_workers;
+                            dag::enumerate_pattern(program, {n, b}, preparation_limits,
+                                [&](const std::vector<dag::Task> &window, bool parallel) {
+                                    std::size_t bytes = window.capacity() * sizeof(dag::Task);
+                                    for (const auto &task : window) {
+                                        validate_task(task, n, b, options.audit);
+                                        st.tasks += task.repeat;
+                                        st.phase_tasks += task.symbol == "__copy" || task.symbol == "__zero_upper";
+                                        bytes += task.args.capacity() * sizeof(dag::Int) +
+                                                 task.steps.capacity() * sizeof(dag::Int) +
+                                                 (task.reads.capacity() + task.writes.capacity()) * sizeof(dag::Region);
+                                    }
+                                    st.graph_bytes = std::max(st.graph_bytes, bytes);
+                                    st.peak_window_tasks = std::max(st.peak_window_tasks, window.size());
+                                    ++st.pattern_windows;
+                                    resource_stage = "pattern-execution";
+                                    const auto execute_start = Clock::now();
+                                    numerical_started = true;
+                                    if (parallel && window.size() > 1)
+                                        executor->run_independent(window, kernel);
+                                    else for (const auto &task : window) kernel(task);
+                                    st.execute += elapsed(execute_start);
+                                    resource_stage = "pattern-expansion";
+                                });
+                            st.prepare = std::max(0.0, elapsed(prep_start) - st.execute);
+                            retained_runtime_bytes = executor->reserved_bytes();
+                            break;
+                        }
                         // This bounded speculative expansion stops as soon as its
                         // representation no longer fits. It never runs numerical work.
                         auto tasks = dag::instantiate(program, {n, b}, preparation_limits);
@@ -965,6 +1015,7 @@ int main(int argc, char **argv) {
                << ",\"application\":" << quoted(application)
                << ",\"io_format\":" << quoted(io_format)
                << ",\"mode\":" << quoted(mode) << ",\"backend\":" << quoted(options.backend)
+               << ",\"schedule\":" << quoted(schedule)
                << ",\"memory_budget_bytes\":" << memory
                << ",\"requested_memory_bytes\":" << requested_memory
                << ",\"graph_budget_bytes\":" << graph_budget
@@ -998,6 +1049,8 @@ int main(int argc, char **argv) {
                    << ",\"tasks\":" << s.tasks
                    << ",\"phase_tasks\":" << s.phase_tasks << ",\"edges\":" << s.edges
                    << ",\"workers\":" << s.workers << ",\"steals\":" << s.steals
+                   << ",\"pattern_windows\":" << s.pattern_windows
+                   << ",\"peak_window_tasks\":" << s.peak_window_tasks
                    << ",\"graph_bytes\":" << s.graph_bytes << ",\"prepare_seconds\":" << s.prepare
                    << ",\"execute_seconds\":" << s.execute << ",\"compute_seconds\":" << s.compute
                    << '}';
