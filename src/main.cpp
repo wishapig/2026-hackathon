@@ -531,6 +531,8 @@ int main(int argc, char **argv) {
                 throw dag::ResourceLimit("matrix buffers exceed memory budget");
             const auto matrix_bytes = std::max(elements, a.capacity()) * sizeof(double) +
                                       std::max(elements, l.capacity()) * sizeof(double);
+            if (matrix_bytes > memory - metadata_reserve)
+                throw dag::ResourceLimit("retained matrix capacity exceeds memory budget");
             const auto auxiliary = stats.capacity() * sizeof(CaseStats) +
                                    block_sizes.capacity() * sizeof(std::uint32_t);
             if (auxiliary > memory - metadata_reserve - matrix_bytes)
