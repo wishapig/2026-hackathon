@@ -347,6 +347,9 @@ def diagnostic_scope(report, indices):
 
 
 def common_diagnostic(report, indices=None):
+    if report.get('application') != 'blocked' or report.get('performance_eligible') is False:
+        return {'kind': 'functional_only', 'performance_eligible': False, 'case_indices': [],
+                'reason': 'Only blocked Cholesky participates in performance evaluation (R-27).'}
     samples = [s for s in report['samples'] if not s.get('warmup')]
     available = set(c['index'] for c in report['input_cases'])
     for sample in samples:
@@ -385,6 +388,20 @@ def common_diagnostic(report, indices=None):
 
 def summarize(report):
     measured = [s for s in report['samples'] if not s.get('warmup')]
+    report['performance_eligible'] = report.get('application') == 'blocked'
+    report['evaluation_kind'] = 'performance' if report['performance_eligible'] else 'functional_only'
+    if not report['performance_eligible']:
+        report['correctness_passed'] = bool(report['samples']) and all(
+            s.get('correctness_passed') for s in report['samples'])
+        for sample in report['samples']:
+            sample['full_batch_eligible'] = False
+            sample['performance_eligible'] = False
+        report['summary'] = {'metadata_bytes': report['metadata_bytes'],
+                             'evaluation_kind': 'functional_only', 'performance_eligible': False,
+                             'correctness_passed': report['correctness_passed'],
+                             'measured_samples': len(measured)}
+        report['passed'] = report['correctness_passed']
+        return
     times = [s['score_seconds'] for s in measured if s.get('full_batch_eligible')]
     report['summary'] = {'metadata_bytes': report['metadata_bytes'], 'successful_samples': len(times),
                          'full_batch_samples': len(times), 'measured_samples': len(measured),
@@ -408,6 +425,9 @@ def compare_reports(argv):
     if len(args.reports) < 2:
         parser.error('at least two reports required')
     reports = [json.loads(p.read_text()) for p in args.reports]
+    if any(r.get('application') != 'blocked' or r.get('performance_eligible') is False
+           or r.get('kind') == 'functional_only' for r in reports):
+        parser.error('functional-only algorithms cannot enter performance comparisons (R-27)')
     first = reports[0]
     for report in reports:
         if not report.get('environment_fingerprint') or not report.get('input_cases'):
@@ -598,6 +618,12 @@ def accept_public20(argv):
             build / 'spd_generator', build / 'public_verifier', build / 'dag_check', inp, out)}
         report['metadata_bytes'] = (build / 'block_cholesky.meta').stat().st_size
         report['passed'] = sample['full_batch_eligible']
+        functional = functional_algorithms(build, result_dir / 'functional', env, a.timeout)
+        report['functional_validation'] = {
+            'passed': functional['passed'], 'performance_eligible': False,
+            'report': str(result_dir / 'functional/functional-algorithms.json')}
+        report['requirements'].append('R-27')
+        report['passed'] = report['passed'] and functional['passed']
     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
         report['error'] = str(error)
         if 'expected' in locals():
@@ -618,13 +644,193 @@ def accept_public20(argv):
         print('Additional checks: PASS; compute seconds=' + str(report['score_seconds']), flush=True)
         print('Kernel mode: ' + report['runtime']['kernel_mode'] +
               '; allowed single-NUMA CPUs=' + str(report['runtime']['cpus']), flush=True)
+    elif report.get('functional_validation', {}).get('passed') is False:
+        print('Functional algorithm validation: FAIL; see functional report.', flush=True)
     elif report.get('public_acceptance_passed') and report.get('additional_checks_passed'):
         print('PUBLIC20 correctness: PASS; complete performance: INELIGIBLE (resource-limited cases)', flush=True)
     return int(not report['passed'])
 
 
+def verify_algorithm_outputs(path, expected):
+    """Independent known-factor / rational-recurrence oracle, R-15/R-27."""
+    import math
+    with path.open('rb') as f:
+        def exact(size):
+            data = f.read(size)
+            if len(data) != size:
+                raise ValueError('truncated functional output')
+            return data
+        if struct.unpack('=I', exact(4))[0] != len(expected):
+            raise ValueError('functional output case count mismatch')
+        results = []
+        for index, (n, b, values) in enumerate(expected):
+            if struct.unpack('=II', exact(8)) != (n, b):
+                raise ValueError('functional output shape/order mismatch')
+            actual = struct.unpack('=' + str(n*n) + 'd', exact(n*n*8))
+            if any(not math.isfinite(x) for x in actual):
+                raise ValueError('non-finite functional output')
+            error = max(abs(x-y) for x, y in zip(actual, values))
+            if any(not math.isclose(x, y, rel_tol=1e-11, abs_tol=1e-12)
+                   for x, y in zip(actual, values)):
+                raise ValueError('independent oracle mismatch for case ' + str(index))
+            results.append({'index': index, 'n': n, 'b': b, 'max_absolute_error': error,
+                            'status': 'PASS'})
+        if f.read(1):
+            raise ValueError('trailing functional output data')
+    return results
+
+
+def functional_algorithms(build, result_dir, env, timeout):
+    """Correctness component of the benchmark, never a performance candidate."""
+    from fractions import Fraction
+    root = Path(__file__).resolve().parents[1]
+    build, result_dir = Path(build).resolve(), Path(result_dir).resolve()
+    result_dir.mkdir(parents=True, exist_ok=True)
+    report_path = result_dir / 'functional-algorithms.json'
+    report = {'kind': 'functional_only', 'performance_eligible': False,
+              'requirements': ['R-03', 'R-04', 'R-05', 'R-15', 'R-16', 'R-18', 'R-27'],
+              'scope': 'Supplemental supported-subset examples; not the missing original source or full legal-domain coverage.',
+              'validation': {'relative_tolerance': 1e-11, 'absolute_tolerance': 1e-12,
+                             'cholesky': 'Known dyadic positive-diagonal factor plus supplied verifier and dag_check',
+                             'wavefront': 'Exact Fraction reference evaluated column-first, independent of source traversal'},
+              'algorithms': [], 'passed': False}
+    def save():
+        report_path.write_text(json.dumps(report, indent=2) + '\n')
+    clean = env.copy()
+    for key in ('DAG_METADATA', 'DAG_STATS_FILE', 'COMPILER2026_TIMING_FILE',
+                'DAG_BLOCK_SIZE', 'DAG_BLOCK_SIZES'):
+        clean.pop(key, None)
+    clean.update(DAG_APPLICATION='scalar', DAG_IO_FORMAT='public')
+    report['effective_controls'] = {k: v for k, v in clean.items() if is_control(k)}
+    shapes = [(3, 1), (7, 1), (16, 4), (31, 1)]
+    try:
+        report['program_sha256'] = digest(build / 'dag_run')
+        report['compiler_sha256'] = digest(root / 'compiler/compile.py')
+        report['checker_sha256'] = {name: digest(build / name)
+                                    for name in ('public_verifier', 'dag_check')}
+        with tempfile.TemporaryDirectory(prefix='dag-functional-') as temp:
+            temp = Path(temp)
+            for name, source, kind in [
+                    ('naive_cholesky', 'naive_cholesky.cpp', 'cholesky'),
+                    ('right_looking_cholesky', 'right_looking_cholesky.cpp', 'cholesky'),
+                    ('scalar_wavefront', 'scalar_wavefront.cpp', 'wavefront')]:
+                entry = {'name': name, 'kind': 'functional_only', 'performance_eligible': False,
+                         'source': str(root / 'examples' / source),
+                         'source_sha256': digest(root / 'examples' / source),
+                         'catalog_sha256': digest(root / 'examples/naive_catalog.json'),
+                         'runs': [], 'stages': [], 'passed': False}
+                report['algorithms'].append(entry)
+                print('[functional-only: ' + name + ']', flush=True)
+                def run_stage(label, command, child_env):
+                    record = {'stage': label, 'command': [str(x) for x in command]}
+                    entry['stages'].append(record)
+                    try:
+                        run = subprocess.run(record['command'], cwd=root, env=child_env,
+                                             capture_output=True, text=True, timeout=timeout)
+                        record.update(returncode=run.returncode, stdout=run.stdout, stderr=run.stderr)
+                    except (OSError, subprocess.TimeoutExpired) as error:
+                        record['error'] = str(error)
+                        raise
+                    if run.returncode:
+                        raise RuntimeError(name + ' ' + label + ' failed')
+                    return run
+                try:
+                    metadata = temp / (name + '.meta')
+                    run_stage('compile', [sys.executable, root/'compiler/compile.py',
+                              root/'examples'/source, '--entry', name, '--catalog',
+                              root/'examples/naive_catalog.json', '-o', metadata], clean)
+                    entry.update(metadata_bytes=metadata.stat().st_size, metadata_sha256=digest(metadata))
+                    inp = temp / (name + '.bin')
+                    expected = []
+                    with inp.open('wb') as f:
+                        f.write(struct.pack('=I', len(shapes)))
+                        for n, b in shapes:
+                            if kind == 'cholesky':
+                                factor = [[(2 + i/32) if i == j else
+                                           (((i*7+j*3)%11-5)/32 if j < i else 0.0)
+                                           for j in range(n)] for i in range(n)]
+                                a = [sum(factor[i][k]*factor[j][k] for k in range(n))
+                                     for i in range(n) for j in range(n)]
+                                values = [x for row in factor for x in row]
+                            else:
+                                a = [((i*5+j*3)%17-8)/16 for i in range(n) for j in range(n)]
+                                ref = [Fraction(x) for x in a]
+                                for col in range(1, n):
+                                    for row in range(1, n):
+                                        at = row*n+col
+                                        ref[at] = Fraction(a[at]) + ref[at-n]/4 + ref[at-1]/2
+                                values = [float(x) for x in ref]
+                            f.write(struct.pack('=II', n, b))
+                            f.write(struct.pack('=' + str(n*n) + 'd', *a))
+                            expected.append((n, b, values))
+                    entry['input_sha256'] = digest(inp)
+                    for mode in ('serial', 'parallel'):
+                        out, stats = temp/(name+'-'+mode+'.out'), temp/(name+'-'+mode+'.json')
+                        child = clean.copy()
+                        child.update(DAG_METADATA=str(metadata), DAG_STATS_FILE=str(stats), DAG_MODE=mode)
+                        run_stage(mode, [build/'dag_run', inp, out], child)
+                        runtime = json.loads(stats.read_text())
+                        run_record = {'requested_mode': mode, 'performance_eligible': False,
+                                      'runtime_diagnostics': runtime, 'output_sha256': digest(out),
+                                      'passed': False}
+                        entry['runs'].append(run_record)
+                        observed = runtime.get('cases', [])
+                        if len(observed) != len(shapes) or any(
+                                (c.get('index'), c.get('n'), c.get('b')) != (i, n, b)
+                                for i, (c, (n, b)) in enumerate(zip(observed, shapes))):
+                            raise ValueError('runtime case identity mismatch')
+                        if mode == 'parallel' and any(c.get('execution_mode') != 'parallel' for c in observed):
+                            raise ValueError('parallel functional coverage not achieved; inspect resource diagnostics')
+                        rows = verify_algorithm_outputs(out, expected)
+                        if kind == 'cholesky':
+                            for checker in ('public_verifier', 'dag_check'):
+                                checked = run_stage(mode+'-'+checker, [build/checker, inp, out], child)
+                                expected_prefixes = [f'case={i} n={n} b={b} scaled_residual='
+                                                     for i, (n, b) in enumerate(shapes)]
+                                lines = checked.stdout.splitlines()
+                                if len(lines) != len(shapes) or any(
+                                        not line.startswith(prefix) or not line.endswith('status=PASS')
+                                        for line, prefix in zip(lines, expected_prefixes)):
+                                    raise ValueError('checker did not report all matching PASS rows')
+                        run_record.update(cases=rows, passed=True)
+                    entry['passed'] = True
+                except (OSError, ValueError, RuntimeError, KeyError, subprocess.TimeoutExpired) as error:
+                    entry['error'] = str(error)
+                save()
+        report['passed'] = len(report['algorithms']) == 3 and all(x['passed'] for x in report['algorithms'])
+    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
+        report['error'] = str(error)
+    save()
+    print('Functional-only algorithms: ' + ('PASS' if report['passed'] else 'FAIL') +
+          '; excluded from performance statistics. Report: ' + str(report_path), flush=True)
+    return report
+
+
+def verify_algorithms(argv):
+    root = Path(__file__).resolve().parents[1]
+    parser = argparse.ArgumentParser(description='Build and verify supplemental algorithms; no performance ranking.')
+    parser.add_argument('--build-dir', type=Path, default=root/'build')
+    parser.add_argument('--output-dir', type=Path, default=root/'artifacts/functional')
+    parser.add_argument('--jobs', type=int, default=8)
+    parser.add_argument('--timeout', type=float, default=600)
+    add_controls(parser)
+    args = parser.parse_args(argv)
+    env, policy = execution_environment(args, parser)
+    if args.jobs < 1 or not (0 < args.timeout < float('inf')):
+        parser.error('invalid jobs/timeout')
+    for command in ([ 'cmake', '-S', str(root), '-B', str(args.build_dir), '-DCMAKE_BUILD_TYPE=Release'],
+                    ['cmake', '--build', str(args.build_dir), '--parallel', str(args.jobs),
+                     '--target', 'dag_run', 'public_verifier', 'dag_check']):
+        run = subprocess.run(command, env=env, timeout=args.timeout)
+        if run.returncode:
+            return run.returncode
+    report = functional_algorithms(args.build_dir, args.output_dir, env, args.timeout)
+    return int(not report['passed'])
+
+
 def main():
-    commands = {'accept-public20': accept_public20, 'compare-reports': compare_reports, 'submit': submit}
+    commands = {'accept-public20': accept_public20, 'compare-reports': compare_reports, 'submit': submit,
+                'verify-algorithms': verify_algorithms}
     if len(sys.argv) > 1 and sys.argv[1] in commands:
         return commands[sys.argv[1]](sys.argv[2:])
     p = argparse.ArgumentParser(description=__doc__)
@@ -635,6 +841,8 @@ def main():
     p.add_argument('--warmups', type=int, default=1)
     add_controls(p, default_mode='parallel')
     p.add_argument('--checker', type=Path, required=True)
+    p.add_argument('--validate-algorithms', action='store_true',
+                   help='run supplemental functional checks after timing; excluded from performance statistics')
     p.add_argument('--kernel-library', type=Path,
                    help='library identity for cross-report comparisons; inferred from adjacent CMake build when possible')
     p.add_argument('--report', type=Path, required=True)
@@ -688,7 +896,7 @@ def main():
     report['kernel_library'] = kernel_identity(a.program, a.kernel_library)
     report['environment_identity'] = environment_identity(env_base)
     report['environment_fingerprint'] = fingerprint(report['environment_identity'])
-    report['requirements'] += ['R-25', 'R-26']
+    report['requirements'] += ['R-25', 'R-26', 'R-27']
     failed = False
     with tempfile.TemporaryDirectory(prefix='dag-benchmark-') as d:
         d = Path(d)
@@ -755,6 +963,13 @@ def main():
             a.report.write_text(json.dumps(report, indent=2) + '\n')
     summarize(report)
     report['passed'] = report['passed'] and not failed
+    if a.validate_algorithms:
+        functional_dir = a.report.parent / (a.report.stem + '-functional')
+        functional = functional_algorithms(a.program.resolve().parent, functional_dir, env_base, a.timeout)
+        report['functional_validation'] = {
+            'passed': functional['passed'], 'performance_eligible': False,
+            'report': str((functional_dir / 'functional-algorithms.json').resolve())}
+        report['passed'] = report['passed'] and functional['passed']
     a.report.write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps({'passed': report['passed'], **report['summary']}))
     return int(not report['passed'])

@@ -2,7 +2,7 @@
 
 每次工作先读 [REQUIREMENTS.md](REQUIREMENTS.md)，这是唯一需求规范。本文仅说明当前程序用法。
 
-**比赛推荐与准确提交命令见 [SUBMISSION.md](SUBMISSION.md)。** 推荐P005（257字节Metadata）；当前build已更新并与其被测二进制哈希一致。默认资源自适应，不携带本机线程/内存覆盖。正式库和目标机未验证。
+**比赛推荐与准确提交命令见 [SUBMISSION.md](SUBMISSION.md)。** 原交接版本为P005（257字节Metadata）；R-28后续实现P007改为141字节，变更和新证据见下节。默认资源自适应，不携带本机线程/内存覆盖。正式库和目标机未验证。
 
 Python 编译器将支持的源码子集与算子契约转换为 Metadata；C++ runtime 按实际参数构图并调用公共 cholesky/trsm/madd。按后续回复，当前验收使用 public20 的 `count + [n, b, matrix]` 协议；原题面格式另有显式兼容模式。
 
@@ -75,7 +75,7 @@ python3 tools/benchmark.py build/dag_run artifacts/public20.bin \
 
 每轮从启动程序、加载 Metadata、读取输入、计算到生成输出，保留完整计算时间及程序墙钟时间；随后独立校验，不把校验耗时混入性能。失败记录保留并令整体失败，只有校验成功的样本参与成功耗时统计。报告记录输入/程序/Metadata/校验器指纹与 Metadata 大小。
 
-原题面或标量应用的最终测量使用 `--io-format original`、`--application scalar`（按需）。benchmark 默认清除继承的 DAG 环境设置，因此原格式分块参数必须使用显式 CLI `--block-size 100` 或 `--block-sizes 3,4,8`（按输入记录对应，二者互斥）；不能仅设置父环境的 `DAG_BLOCK_SIZE`。基准向程序和校验器传递同一协议配置。例如：
+原题面协议使用 `--io-format original`；标量应用使用 `--application scalar`，其报告只用于功能验证，不产生性能中位数或参与性能比较。benchmark 默认清除继承的 DAG 环境设置，因此原格式分块参数必须使用显式 CLI `--block-size 100` 或 `--block-sizes 3,4,8`（按输入记录对应，二者互斥）；不能仅设置父环境的 `DAG_BLOCK_SIZE`。基准向程序和校验器传递同一协议配置。例如：
 
 ```bash
 python3 tools/benchmark.py build/dag_run input-original.bin \
@@ -87,6 +87,16 @@ python3 tools/benchmark.py build/dag_run input-original.bin \
 当前加强校验器使用残差、有限值、正对角线检查；指定的公开验收命令始终额外执行原包 verifier。demo/宿主结果不是正式库或 Kunpeng 成绩。多个配置依次运行，避免构建、生成器与测量并发。
 
 临时验证放临时目录，用后删除脚本、数据和日志。项目不保留单元/回归测试套件、CTest 注册或历史测试报告文档。
+
+### 其他算法：仅功能验证
+
+```bash
+python3 tools/benchmark.py verify-algorithms
+```
+
+该 benchmark 子命令构建当前运行时，将朴素左看式 Cholesky、右看式标量 Cholesky、二维波前递推源码分别编译成 Metadata，并在 n=3/7/16/31 的多 case 输入上验证串行和并行执行。两个 Cholesky 示例使用已知正对角因子构造输入，另跑配套 verifier 和 dag_check；波前使用独立的精确分数递推参考。示例只证明当前源码子集适用性，不冒充未提供的题目源码。
+
+`accept-public20` 默认在分块计时结束后执行同一功能门槛；普通 benchmark 命令加 `--validate-algorithms` 可附加运行。功能失败令命令失败，报告以 `functional_only` / `performance_eligible: false` 标记，保留每算法 Metadata 大小、指纹和诊断。只有分块 Cholesky 进入性能汇总与比较；功能用例的时间、Metadata 大小不会累加到分块成绩。默认功能报告为 `artifacts/functional/functional-algorithms.json`。
 
 ## 正式库
 
@@ -120,3 +130,11 @@ python3 tools/benchmark.py submit build/dag_run input.bin output.bin \
 该入口默认自动线程与预算，避免把本地16线程或低内存限制带到目标机。确有目标资源限制时通过 `--threads`、`--memory-mb`、`--graph-memory-mb` 明确指定，OS亲和集/cgroup限制始终有效。
 
 资源回退的原始耗时保留，但不进入算法完整性能汇总；共同有效case诊断单独列出覆盖率和排除原因，不能冒充完整公开集成绩。可在相同输入、硬件资源和算子库条件下执行 `python3 tools/benchmark.py compare-reports report-a.json report-b.json --report comparison.json`，只比较共同有效case。
+
+## R-28：默认执行文件精简
+
+当前默认编译输出lean/lean-deflate，分块Metadata为141字节。删除默认SHA-256来源字段、额外FNV和zlib包装校验；源变量名、表达式运算符及重复调用引用改为编号。外部算子和缓冲区绑定身份仍各保存一次，控制流程与读写语义不变。
+
+重复图扫描和契约审计默认关闭，原有DAG_AUDIT=1可显式开启。资源约束、数值正确性与配套verifier门槛仍保留。默认编译不计算来源SHA；仅显式旧格式或可选json-debug在离线编译时生成旧字段，历史Metadata仍可读。
+
+实现commit与五轮交错结果见 [P007](results/pareto/P007/manifest.json)。此前SUBMISSION.md的P005为历史可回退交接，不代表这次更新后的默认产物。验收继续使用现有accept-public20入口，并包含R27功能验证。
