@@ -96,6 +96,31 @@ python3 tools/benchmark.py build/dag_run input-original.bin \
 python3 tools/benchmark.py verify-algorithms
 ```
 
+### DAG 调度时间估算（显式诊断命令）
+
+如果需要单独观察算子耗时、运行时任务图规模和调度策略的理想化影响，可以使用新增的 `estimate-schedule` 子命令。它不会被普通 benchmark、`summarize()`、`compare-reports` 或正式性能排名调用，也不会修改默认 runtime 调度配置。
+
+先构建估算工具和当前 Metadata：
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target dag_estimate metadata
+python3 tools/benchmark.py estimate-schedule \
+  --metadata build/block_cholesky.meta \
+  --n 16 --b 4 \
+  --workers 1 2 4 8 \
+  --samples 5 --warmups 0 \
+  --policy current fifo \
+  --report artifacts/estimate-schedule.json \
+  --dag-estimate build/dag_estimate
+```
+
+默认 `--warmups 0`，每个算子样本在计时区间外重新初始化缓冲区，适合原始应用数据没有预热机会的场景。校准使用当前构建中链接的 `cholesky`、`trsm` 和 `madd` C ABI；如果库或 ABI 无法使用，命令会报告错误，不会生成伪造耗时。
+
+估算工具复用 `src/metadata.cpp` 和 `src/graph.cpp` 的 Metadata 解码、参数化实例化和完整 CSR 构图路径，报告任务数、边数、图内存、copy/zero-upper 阶段，以及 `current` 和 `fifo` 的估计 DAG 时间、总建模工作量、关键路径、理论下界、利用率、窃取次数、continuation 次数和各 worker busy time。`--graph-memory-mb`、`--max-tasks`、`--max-steps` 超限会明确标记 `resource_limited`。
+
+报告还包含 demo baseline 的同一 `n,b` kernel 流程实测，并生成同名 `.svg` 对照图。该图只用于诊断，不是端到端性能结果。估算结果不包含 Metadata 解码、任务展开、建图、矩阵分配、线程池启动、copy/zero-upper（这些阶段会单独标记）、cache contention、内存带宽、NUMA、同步和 CPU 频率变化；报告固定包含 `performance_eligible: false` 和 `correctness_validated: false`。macOS 上可以运行这条独立估算路径，但现有正式 worker runtime 仍依赖 Linux CPU affinity/NUMA 接口，因此本机结果不能代表 Ubuntu/Kunpeng 正式性能。
+
 该 benchmark 子命令构建当前运行时，将朴素左看式 Cholesky、右看式标量 Cholesky、二维波前递推源码分别编译成 Metadata，并在 n=3/7/16/31 的多 case 输入上验证串行和并行执行。两个 Cholesky 示例使用已知正对角因子构造输入，另跑配套 verifier 和 dag_check；波前使用独立的精确分数递推参考。示例只证明当前源码子集适用性，不冒充未提供的题目源码。
 
 `accept-public20` 默认在分块计时结束后执行同一功能门槛；普通 benchmark 命令加 `--validate-algorithms` 可附加运行。功能失败令命令失败，报告以 `functional_only` / `performance_eligible: false` 标记，保留每算法 Metadata 大小、指纹和诊断。只有分块 Cholesky 进入性能汇总与比较；功能用例的时间、Metadata 大小不会累加到分块成绩。默认功能报告为 `artifacts/functional/functional-algorithms.json`。
