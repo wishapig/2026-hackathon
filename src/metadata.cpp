@@ -939,6 +939,12 @@ struct Evaluator {
     const std::function<void(const Task &)> &emit;
     std::size_t steps = 0, count = 0, elements;
     bool source_int32 = false;
+    // Pattern/window enumeration temporarily redirects publication here.  A
+    // window is deliberately owned by the caller: the evaluator only emits
+    // the tasks belonging to the current outer-loop iteration and never keeps
+    // completed windows alive.  The ordinary enumerate_program path leaves
+    // this null and retains its original one-task callback semantics.
+    std::vector<Task> *capture = nullptr;
     Int checked(__int128 value) {
         Int result = narrow(value);
         if (source_int32 && (result < std::numeric_limits<std::int32_t>::min() ||
@@ -1174,79 +1180,83 @@ struct Evaluator {
             (limits.max_tasks && (count > limits.max_tasks || t.repeat > limits.max_tasks - count)))
             throw std::runtime_error("task count budget exceeded");
         count += t.repeat;
-        emit(t);
+        if (capture)
+            capture->push_back(t);
+        else
+            emit(t);
+    }
+    void run_node(BoundNode &node, std::vector<Int> &values) {
+        tick();
+        switch (node.source->kind) {
+        case Node::Kind::Let:
+            values[node.slot] = checked(eval(node.value, values));
+            break;
+        case Node::Kind::For: {
+            Int first = checked(eval(node.start, values)), last = eval(node.stop, values);
+            // C++ never evaluates the increment of a zero-iteration loop.
+            // The supported step is invariant, but need not be defined when
+            // the loop body is unreachable for the actual parameters.
+            if (first >= last)
+                break;
+            Int step = eval(node.step, values);
+            if (step <= 0)
+                throw std::runtime_error("nonpositive loop step");
+            for (auto *call : node.scope_calls) call->fields_initialized = false;
+            if (pack_loop(node, values, first, last, step)) break;
+            for (Int i = first; i < last;) {
+                tick();
+                values[node.slot] = i;
+                run(node.body, values);
+                i = checked(static_cast<__int128>(i) + step);
+            }
+            break;
+        }
+        case Node::Kind::If:
+            run(eval(node.condition, values) ? node.body : node.otherwise, values);
+            break;
+        case Node::Kind::Call: {
+            auto &t = node.scratch;
+            if (node.fields_initialized) {
+                update_fields(node, values);
+            } else {
+                for (std::size_t i = 0; i < node.args.size(); ++i)
+                    t.args[i] = eval(node.args[i], values);
+                for (std::size_t i = 0; i < node.reads.size(); ++i)
+                    region(node.reads[i], values, t.reads[i]);
+                for (std::size_t i = 0; i < node.writes.size(); ++i)
+                    region(node.writes[i], values, t.writes[i]);
+                node.fields_initialized = !node.changing_fields.empty();
+            }
+            publish(t);
+            break;
+        }
+        case Node::Kind::Copy: {
+            Task t;
+            t.symbol = "__copy";
+            t.reads.push_back({"A", 0, static_cast<std::size_t>(p.n),
+                               static_cast<std::size_t>(p.n), static_cast<std::size_t>(p.n)});
+            t.writes.push_back({"L", 0, static_cast<std::size_t>(p.n),
+                                static_cast<std::size_t>(p.n), static_cast<std::size_t>(p.n)});
+            publish(std::move(t));
+            break;
+        }
+        case Node::Kind::ZeroUpper: {
+            Task t;
+            t.symbol = "__zero_upper";
+            if (static_cast<std::size_t>(p.n) > limits.memory_bytes / sizeof(Region))
+                throw ResourceLimit("zero-upper region budget");
+            for (Int row = 0; row < p.n - 1; ++row)
+                t.writes.push_back({"L", static_cast<std::size_t>(row * p.n + row + 1), 1,
+                                    static_cast<std::size_t>(p.n - row - 1),
+                                    static_cast<std::size_t>(p.n)});
+            publish(std::move(t));
+            break;
+        }
+        }
     }
     void run(std::vector<BoundNode> &nodes, std::vector<Int> &values) {
-        for (auto &node : nodes) {
-            tick();
-            switch (node.source->kind) {
-            case Node::Kind::Let:
-                values[node.slot] = checked(eval(node.value, values));
-                break;
-            case Node::Kind::For: {
-                Int first = checked(eval(node.start, values)), last = eval(node.stop, values);
-                // C++ never evaluates the increment of a zero-iteration loop.
-                // The supported step is invariant, but need not be defined when
-                // the loop body is unreachable for the actual parameters.
-                if (first >= last)
-                    break;
-                Int step = eval(node.step, values);
-                if (step <= 0)
-                    throw std::runtime_error("nonpositive loop step");
-                for (auto *call : node.scope_calls) call->fields_initialized = false;
-                if (pack_loop(node, values, first, last, step)) break;
-                for (Int i = first; i < last;) {
-                    tick();
-                    values[node.slot] = i;
-                    run(node.body, values);
-                    i = checked(static_cast<__int128>(i) + step);
-                }
-                break;
-            }
-            case Node::Kind::If: {
-                run(eval(node.condition, values) ? node.body : node.otherwise, values);
-                break;
-            }
-            case Node::Kind::Call: {
-                auto &t = node.scratch;
-                if (node.fields_initialized) {
-                    update_fields(node, values);
-                } else {
-                    for (std::size_t i = 0; i < node.args.size(); ++i)
-                        t.args[i] = eval(node.args[i], values);
-                    for (std::size_t i = 0; i < node.reads.size(); ++i)
-                        region(node.reads[i], values, t.reads[i]);
-                    for (std::size_t i = 0; i < node.writes.size(); ++i)
-                        region(node.writes[i], values, t.writes[i]);
-                    node.fields_initialized = !node.changing_fields.empty();
-                }
-                publish(t);
-                break;
-            }
-            case Node::Kind::Copy: {
-                Task t;
-                t.symbol = "__copy";
-                t.reads.push_back({"A", 0, static_cast<std::size_t>(p.n),
-                                   static_cast<std::size_t>(p.n), static_cast<std::size_t>(p.n)});
-                t.writes.push_back({"L", 0, static_cast<std::size_t>(p.n),
-                                    static_cast<std::size_t>(p.n), static_cast<std::size_t>(p.n)});
-                publish(std::move(t));
-                break;
-            }
-            case Node::Kind::ZeroUpper: {
-                Task t;
-                t.symbol = "__zero_upper";
-                if (static_cast<std::size_t>(p.n) > limits.memory_bytes / sizeof(Region))
-                    throw ResourceLimit("zero-upper region budget");
-                for (Int row = 0; row < p.n - 1; ++row)
-                    t.writes.push_back({"L", static_cast<std::size_t>(row * p.n + row + 1), 1,
-                                        static_cast<std::size_t>(p.n - row - 1),
-                                        static_cast<std::size_t>(p.n)});
-                publish(std::move(t));
-                break;
-            }
-            }
-        }
+        for (auto &node : nodes)
+            run_node(node, values);
     }
 };
 } // namespace
@@ -1381,12 +1391,102 @@ void execute_bound(const Program &program, BoundProgram &bound, Parameters p,
             throw std::runtime_error("source parameter guard rejected input");
     e.run(bound.nodes, values);
 }
+
+// Enumerate a proven outer-loop pattern one barrier window at a time.  The
+// current Metadata language does not carry an explicit dependence template;
+// the conservative proof used here is the lexical shape itself: exactly one
+// top-level For may be streamed, and all statements around it are the
+// built-in copy/zero phases.  A window contains one complete outer iteration,
+// so callers may safely execute it and wait before advancing the outer cursor.
+// Inner For nodes still use the normal affine contiguous-loop compression in
+// Evaluator::pack_loop.  Programs outside this shape retain the existing
+// generic enumerator and are delivered as one window rather than silently
+// changing their execution order.
+using WindowEmitter = std::function<void(std::vector<Task> &&)>;
+void execute_bound_windows(const Program &program, BoundProgram &bound, Parameters p,
+                           std::size_t elements, const Limits &limits,
+                           const WindowEmitter &emit_window) {
+    Limits remaining = limits;
+    remaining.memory_bytes -= bound.bytes;
+    std::vector<Int> values(bound.slots, 0);
+    values[0] = p.n;
+    values[1] = p.b;
+    const std::function<void(const Task &)> discard = [](const Task &) {};
+    Evaluator e{p, remaining, discard, 0, 0, elements, program.source_int32};
+    for (const auto &guard : bound.guards)
+        if (!e.eval(guard, values))
+            throw std::runtime_error("source parameter guard rejected input");
+
+    std::size_t outer = 0;
+    for (const auto &node : bound.nodes)
+        if (node.source->kind == Node::Kind::For)
+            ++outer;
+    bool supported = outer == 1;
+    if (supported) {
+        for (const auto &node : bound.nodes)
+            if (node.source->kind != Node::Kind::For &&
+                node.source->kind != Node::Kind::Copy &&
+                node.source->kind != Node::Kind::ZeroUpper)
+                supported = false;
+    }
+    if (!supported) {
+        // Keep the generic path exact for multiple outer loops, lets, and
+        // conditionals.  A single callback still gives the caller a valid
+        // barrier boundary without pretending that the pattern is parallel.
+        std::vector<Task> all;
+        e.capture = &all;
+        e.run(bound.nodes, values);
+        e.capture = nullptr;
+        emit_window(std::move(all));
+        return;
+    }
+
+    for (auto &node : bound.nodes) {
+        if (node.source->kind != Node::Kind::For) {
+            std::vector<Task> window;
+            e.capture = &window;
+            e.run_node(node, values);
+            e.capture = nullptr;
+            emit_window(std::move(window));
+            continue;
+        }
+        auto &loop = node;
+        // Keep the source interpreter's work accounting: entering a For is a
+        // step in addition to each executed iteration.
+        e.tick();
+        const Int first = e.checked(e.eval(loop.start, values));
+        const Int last = e.eval(loop.stop, values);
+        if (first >= last)
+            continue;
+        const Int step = e.eval(loop.step, values);
+        if (step <= 0)
+            throw std::runtime_error("nonpositive loop step");
+        for (auto *call : loop.scope_calls)
+            call->fields_initialized = false;
+        for (Int i = first; i < last;) {
+            e.tick();
+            values[loop.slot] = i;
+            std::vector<Task> window;
+            e.capture = &window;
+            e.run(loop.body, values);
+            e.capture = nullptr;
+            emit_window(std::move(window));
+            i = e.checked(static_cast<__int128>(i) + step);
+        }
+    }
+}
 } // namespace
 void enumerate_program(const Program &program, Parameters p, const Limits &limits,
                        const std::function<void(const Task &)> &emit) {
     const auto elements = parameter_elements(program, p);
     auto bound = Lowering{limits, {}}.lower(program);
     execute_bound(program, bound, p, elements, limits, emit);
+}
+void enumerate_program_windows(const Program &program, Parameters p, const Limits &limits,
+                              const std::function<void(std::vector<Task> &&)> &emit_window) {
+    const auto elements = parameter_elements(program, p);
+    auto bound = Lowering{limits, {}}.lower(program);
+    execute_bound_windows(program, bound, p, elements, limits, emit_window);
 }
 std::vector<Task> instantiate(const Program &program, Parameters p, const Limits &limits) {
     const auto elements = parameter_elements(program, p);
