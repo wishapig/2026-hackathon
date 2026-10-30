@@ -1,5 +1,23 @@
 # 比赛提交交接
 
+## 夜间当前已验收版本（最终冻结前）
+
+**当前可回退的新候选：P010，b80e04d5e68ba5b8427955d55d4fd5b1ec1589e0，标签pareto/P010。** 默认Metadata139字节。完整公开验收（原verifier20/20、加强校验20/20）和R-27三算法功能已通过；本轮最终冻结尚未完成，后续实验不自动成为推荐。
+
+P010包含按实际预算回收的矩阵容量复用、循环作用域字段惰性复用、离线deflate策略选择、已有线程池的计时内矩阵初始化。没有改公共算子、n/b、逻辑布局或计时排除范围，也没有新增计分审计/名称/哈希。
+
+同场1warmup+5次独立进程，中位P010为0.327759371秒，旧基线0.349058080秒，去掉并行初始化的组合0.342698438秒。主机存在明显耗时漂移；保留全体样本，不与较早约0.28秒批次拼接收益，不作为Kunpeng或正式库承诺。全部20case有效、没有资源排除。证据：[P010](results/pareto/P010/manifest.json)、[交错原始记录](results/overnight/bulk-confirmation/manifest.json)。
+
+    git worktree add --detach ../contest-p010-submit pareto/P010
+    cd ../contest-p010-submit
+    cmake -S . -B build-submit -DCMAKE_BUILD_TYPE=Release -DDAG_METADATA_ENCODING=auto -DDAG_REQUIRE_OFFICIAL=ON -DDAG_OFFICIAL_LIBRARY=/absolute/path/to/real_judge_kernels.a
+    cmake --build build-submit --parallel 4
+    python3 tools/benchmark.py accept-public20 --build-dir build-submit --output-dir artifacts/acceptance --official-library /absolute/path/to/real_judge_kernels.a --threads 0 --check-threads 4 --clean-env
+    python3 tools/benchmark.py submit build-submit/dag_run input.bin output.bin --metadata build-submit/block_cholesky.meta --configuration-report submission-config.json
+
+真实评委库及目标机未取得。删除两个official CMake选项及验收official-library选项可复现本地demo测试；不可把demo标作正式通过。保留睡前完整回退：round2/baseline（96908872cab3e24e22096fbeac95c64a0f78862d）。P009（d78ec8a134f2e7e94c378a73cdec5c3012c19f08，141B）为单独字段复用历史备选，不与不同时段P010直接混排。
+
+
 ## 第二轮推荐（2026-10-30睡前交接）
 
 **推荐完整基线：96908872cab3e24e22096fbeac95c64a0f78862d，标签round2/baseline。** 数值实现与P007一致，默认Metadata141字节，包含当前R-27其他算法功能验证和R-28无审计负担规则。本轮fanout的CSE、计数批发、派发、缓冲、页布局均已检查并测量，没有稳定胜出的新增默认策略。不要从下方历史P005命令取旧版本。
