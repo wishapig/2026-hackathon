@@ -53,10 +53,14 @@ def accept_public20(argv):
     p.add_argument('--official-library', type=Path)
     p.add_argument('--threads', type=int, default=0,
                    help='0 uses the runtime-selected allowed single-NUMA CPU set')
+    p.add_argument('--mode', choices=['auto', 'parallel', 'serial'], default='auto')
+    p.add_argument('--batch', type=int, default=1)
+    p.add_argument('--backend', choices=['atomic', 'owner'],
+                   default=os.environ.get('DAG_BACKEND', 'atomic'))
     p.add_argument('--jobs', type=int, default=8)
     p.add_argument('--timeout', type=float, default=600)
     a = p.parse_args(argv)
-    if a.threads < 0 or a.jobs < 1 or not (0 < a.timeout < float('inf')):
+    if a.threads < 0 or a.batch < 1 or a.jobs < 1 or not (0 < a.timeout < float('inf')):
         p.error('invalid threads/jobs/timeout')
     build = a.build_dir.resolve()
     a.output_dir.mkdir(parents=True, exist_ok=True)
@@ -65,9 +69,12 @@ def accept_public20(argv):
     report = {'passed': False, 'public_acceptance_passed': False,
               'scope': 'Initial local public20 validation; not the complete hidden evaluation.',
               'requirements': ['R-12', 'R-13', 'R-14', 'R-15', 'R-18', 'R-19', 'R-21', 'R-22', 'R-24'],
-              'build_dir': str(build), 'result_dir': str(result_dir), 'stages': {}}
+              'build_dir': str(build), 'result_dir': str(result_dir), 'stages': {},
+              'configuration': {'threads': a.threads, 'mode': a.mode,
+                                'batch': a.batch, 'backend': a.backend}}
     env = os.environ.copy()
-    env.update(DAG_IO_FORMAT='public', DAG_APPLICATION='blocked', DAG_MODE='auto',
+    env.update(DAG_IO_FORMAT='public', DAG_APPLICATION='blocked', DAG_MODE=a.mode,
+               DAG_BATCH=str(a.batch), DAG_BACKEND=a.backend,
                DAG_THREADS=str(a.threads), DAG_METADATA=str(build / 'block_cholesky.meta'),
                DAG_STATS_FILE=str(result_dir / 'runtime.json'),
                COMPILER2026_TIMING_FILE=str(result_dir / 'time.txt'))
@@ -167,6 +174,8 @@ def main():
     p.add_argument('--threads', type=int, default=0)
     p.add_argument('--batch', type=int, default=1)
     p.add_argument('--mode', choices=['auto', 'parallel', 'serial'], default='parallel')
+    p.add_argument('--backend', choices=['atomic', 'owner'],
+                   default=os.environ.get('DAG_BACKEND', 'atomic'))
     p.add_argument('--checker', type=Path, required=True)
     p.add_argument('--io-format', choices=['public', 'original'],
                    default=os.environ.get('DAG_IO_FORMAT', 'public'))
@@ -193,7 +202,8 @@ def main():
                                          'DAG_BLOCK_SIZE', 'DAG_BLOCK_SIZES',
                                          'DAG_CHECK_MEMORY_MB', 'DAG_CHECK_THREADS')},
               'validation_scope': 'Selected checker. Use accept-public20 for the supplied verifier workflow.',
-              'configuration': {'threads': a.threads, 'batch': a.batch, 'mode': a.mode},
+              'configuration': {'threads': a.threads, 'batch': a.batch, 'mode': a.mode,
+                                'backend': a.backend},
               'scope': 'Each sample is a fresh process; warmups affect OS caches, not reusable process resources.',
               'summary': {'metadata_bytes': a.metadata.stat().st_size},
               'samples': []}
@@ -206,6 +216,7 @@ def main():
                 path.unlink(missing_ok=True)
             env = os.environ.copy()
             env.update(DAG_THREADS=str(a.threads), DAG_BATCH=str(a.batch), DAG_MODE=a.mode,
+                       DAG_BACKEND=a.backend,
                        DAG_IO_FORMAT=a.io_format, DAG_APPLICATION=a.application,
                        COMPILER2026_TIMING_FILE=str(timing), DAG_STATS_FILE=str(stats))
             if a.metadata:

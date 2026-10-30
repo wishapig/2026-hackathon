@@ -263,8 +263,16 @@ void validate_task(const dag::Task &t, std::uint32_t n, std::uint32_t b) {
     if (t.symbol == "__zero_upper") {
         if (!t.args.empty())
             throw std::runtime_error("zero_upper takes no arguments");
-        for (std::size_t row = 0; row + 1 < n; ++row)
-            require_region(t.writes, "L", row * n + row + 1, 1, n - row - 1, n);
+        // The decoder emits one region per row in order. Verify that common
+        // representation once, without searching the whole list for every row.
+        // Keep the general coverage check for reordered or redundant regions.
+        bool canonical = t.writes.size() == static_cast<std::size_t>(n - 1);
+        for (std::size_t row = 0; canonical && row + 1 < n; ++row)
+            canonical = region_equals(t.writes[row], "L", row * n + row + 1,
+                                      1, n - row - 1, n);
+        if (!canonical)
+            for (std::size_t row = 0; row + 1 < n; ++row)
+                require_region(t.writes, "L", row * n + row + 1, 1, n - row - 1, n);
         return;
     }
     std::size_t argc =
