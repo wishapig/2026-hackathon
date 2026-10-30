@@ -1,0 +1,44 @@
+{
+  "commits": {
+    "baseline": "3429b75d70adb417588f0ecd6c583f32ba6abaa6",
+    "combined": "5a90aaf6c938d68a91742b499254082f33242847",
+    "full": "b80e04d5e68ba5b8427955d55d4fd5b1ec1589e0"
+  },
+  "seconds": {
+    "baseline": [
+      0.33039967800000003,
+      0.34905808,
+      0.34273672599999994,
+      0.371944847,
+      0.37309569000000004
+    ],
+    "combined": [
+      0.342698438,
+      0.334964895,
+      0.341021878,
+      0.40281380399999994,
+      0.368702268
+    ],
+    "full": [
+      0.311857866,
+      0.32775937099999997,
+      0.31159034,
+      0.374288478,
+      0.34299704500000006
+    ]
+  },
+  "median_seconds": {
+    "baseline": 0.34905808,
+    "combined": 0.342698438,
+    "full": 0.32775937099999997
+  },
+  "sampling": "Each round fresh processes in reversed/rotated order. Round0 warmup excluded; rounds1..5 measured. Exclusive root scoring.",
+  "metadata_bytes": {
+    "baseline": 141,
+    "combined": 139,
+    "full": 139
+  },
+  "observed": "Full faster than combination without bulk in all5paired rounds. Absolute host performance drift is visible; retain all samples and do not combine with earlier faster medians.",
+  "coverage": "20/20 all samples; zero resource exclusions; no OOM-based exclusion",
+  "scope": "local x86-64 demo only"
+}

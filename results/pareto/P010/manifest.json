@@ -1,0 +1,35 @@
+{
+  "id": "P010",
+  "implementation_commit": "b80e04d5e68ba5b8427955d55d4fd5b1ec1589e0",
+  "metadata_bytes": 139,
+  "median_seconds": 0.32775937099999997,
+  "baseline_same_session_median_seconds": 0.34905808,
+  "without_bulk_same_session_median_seconds": 0.342698438,
+  "measured_seconds": [
+    0.311857866,
+    0.32775937099999997,
+    0.31159034,
+    0.374288478,
+    0.34299704500000006
+  ],
+  "warmup_report": "../../overnight/bulk-confirmation/0-full.json",
+  "performance_reports": "../../overnight/bulk-confirmation/[1..5]-full.json",
+  "configuration": {
+    "threads": 0,
+    "mode": "auto",
+    "backend": "atomic",
+    "batch": 1,
+    "clean_env": true,
+    "metadata_encoding": "auto"
+  },
+  "acceptance": "acceptance/acceptance.json",
+  "coverage": "20/20, no resource exclusions; R27 all3algorithms passed functional-only",
+  "status": "validated local frontier candidate; retained complete paired evidence with visible host drift, not official target results",
+  "changes": [
+    "capacity reuse with pre-numeric resource reclaim",
+    "lazy loop-scope field reuse",
+    "offline smaller raw-deflate selection",
+    "timed bulk initialization using existing worker pool"
+  ],
+  "scope": "local x86-64 demo; official library/Kunpeng unavailable"
+}
