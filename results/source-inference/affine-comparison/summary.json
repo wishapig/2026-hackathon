@@ -1,0 +1,153 @@
+{
+  "requirements": [
+    "R-01",
+    "R-03",
+    "R-06",
+    "R-16",
+    "R-18",
+    "R-19",
+    "R-21",
+    "R-22",
+    "R-24",
+    "R-26",
+    "R-27",
+    "R-28"
+  ],
+  "baseline_commit": "71ea6fa",
+  "candidate_commit": "025c466",
+  "kernel_mode": "demo-local-debug",
+  "warmups": 0,
+  "method": "Fresh process each sample; no explicit warmup; internal process state is initialized anew; OS page cache is not forcibly dropped. Complete time includes Metadata decode, allocation, preparation, dispatch, kernels and finalization; only matrix file I/O and independent verification are excluded. Single server, sequential before/after groups; not an official judge score.",
+  "mixed_shapes": [
+    [
+      192,
+      3
+    ],
+    [
+      300,
+      5
+    ],
+    [
+      390,
+      5
+    ],
+    [
+      771,
+      3
+    ]
+  ],
+  "rows": [
+    {
+      "case": "n512b1",
+      "threads": 24,
+      "repeats": 3,
+      "metadata_bytes": 136,
+      "before_seconds": 0.296382703,
+      "before_prepare_seconds": 0.1817056290000002,
+      "before_peak_window_tasks": 511,
+      "before_reported_graph_bytes": 290456,
+      "after_seconds": 0.171205053,
+      "after_prepare_seconds": 0.058720676999999985,
+      "after_peak_window_tasks": 511,
+      "after_reported_graph_bytes": 290456,
+      "total_reduction_percent": 42.23514015256148,
+      "prepare_reduction_percent": 67.68362250351643
+    },
+    {
+      "case": "n1024b1",
+      "threads": 24,
+      "repeats": 3,
+      "metadata_bytes": 136,
+      "before_seconds": 1.1622954,
+      "before_prepare_seconds": 0.7290806629999995,
+      "before_peak_window_tasks": 1023,
+      "before_reported_graph_bytes": 442008,
+      "after_seconds": 0.6502564019999999,
+      "after_prepare_seconds": 0.22551272500000097,
+      "after_peak_window_tasks": 1023,
+      "after_reported_graph_bytes": 442008,
+      "total_reduction_percent": 44.054118944289044,
+      "prepare_reduction_percent": 69.0688923126739
+    },
+    {
+      "case": "n2048b1",
+      "threads": 24,
+      "repeats": 3,
+      "metadata_bytes": 136,
+      "before_seconds": 5.798316349,
+      "before_prepare_seconds": 2.8737180270000082,
+      "before_peak_window_tasks": 1024,
+      "before_reported_graph_bytes": 442368,
+      "after_seconds": 3.888253606,
+      "after_prepare_seconds": 0.9247651450000083,
+      "after_peak_window_tasks": 1024,
+      "after_reported_graph_bytes": 442368,
+      "total_reduction_percent": 32.94167872246945,
+      "prepare_reduction_percent": 67.81990660491459
+    },
+    {
+      "case": "n4096b1",
+      "threads": 24,
+      "repeats": 1,
+      "metadata_bytes": 136,
+      "before_seconds": 35.079245323,
+      "before_prepare_seconds": 11.338789178000017,
+      "before_peak_window_tasks": 1024,
+      "before_reported_graph_bytes": 442368,
+      "after_seconds": 27.907483982,
+      "after_prepare_seconds": 3.6125733329999363,
+      "after_peak_window_tasks": 1024,
+      "after_reported_graph_bytes": 442368,
+      "total_reduction_percent": 20.444457327871245,
+      "prepare_reduction_percent": 68.13969043529622
+    },
+    {
+      "case": "mixed-t16",
+      "threads": 16,
+      "repeats": 3,
+      "metadata_bytes": 136,
+      "before_seconds": 0.13939488400000002,
+      "before_prepare_seconds": 0.06450980300000014,
+      "before_peak_window_tasks": 256,
+      "before_reported_graph_bytes": 6976944,
+      "after_seconds": 0.102025614,
+      "after_prepare_seconds": 0.029590686000000012,
+      "after_peak_window_tasks": 256,
+      "after_reported_graph_bytes": 6976944,
+      "total_reduction_percent": 26.80820768142396,
+      "prepare_reduction_percent": 54.12993897997185
+    },
+    {
+      "case": "mixed-t20",
+      "threads": 20,
+      "repeats": 3,
+      "metadata_bytes": 136,
+      "before_seconds": 0.15075756,
+      "before_prepare_seconds": 0.06689057500000009,
+      "before_peak_window_tasks": 256,
+      "before_reported_graph_bytes": 7898076,
+      "after_seconds": 0.114527497,
+      "after_prepare_seconds": 0.03275540400000007,
+      "after_peak_window_tasks": 256,
+      "after_reported_graph_bytes": 7898076,
+      "total_reduction_percent": 24.032004099827564,
+      "prepare_reduction_percent": 51.031361294173315
+    },
+    {
+      "case": "mixed-t24",
+      "threads": 24,
+      "repeats": 3,
+      "metadata_bytes": 136,
+      "before_seconds": 0.160661354,
+      "before_prepare_seconds": 0.07025203299999995,
+      "before_peak_window_tasks": 256,
+      "before_reported_graph_bytes": 10952040,
+      "after_seconds": 0.127400837,
+      "after_prepare_seconds": 0.03610806400000002,
+      "after_peak_window_tasks": 256,
+      "after_reported_graph_bytes": 10952040,
+      "total_reduction_percent": 20.702251146221517,
+      "prepare_reduction_percent": 48.602108069954284
+    }
+  ]
+}

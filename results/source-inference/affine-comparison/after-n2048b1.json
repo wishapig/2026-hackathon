@@ -1,0 +1,689 @@
+{
+  "program": "/root/2026-hackathon-source-inference/build/dag_run",
+  "program_sha256": "8725134043e2fd1bb4a9e71d9d443543fcf308b1178f40748bdcec207bb7b611",
+  "input": "/tmp/pattern2048.bin",
+  "input_sha256": "229d1170b23018e403ae279288c61e42792f6991fce7314f7b50e1fb8f89a0d5",
+  "metadata": "/root/2026-hackathon-source-inference/build/block_cholesky.meta",
+  "metadata_sha256": "f80a2a5b8738dc9bfa2927f062dd436279cbe4275bbc7dd545699f4ba925752a",
+  "metadata_bytes": 136,
+  "checker": "/root/2026-hackathon-source-inference/build/public_verifier",
+  "checker_sha256": "e1d990fa7502b88a14eb4da44d539577d9a2038b8979a71f2c9b9c8f5fb9fd50",
+  "requirements": [
+    "R-06",
+    "R-12",
+    "R-15",
+    "R-18",
+    "R-21",
+    "R-22",
+    "R-23",
+    "R-24",
+    "R-25",
+    "R-26",
+    "R-27"
+  ],
+  "protocol": "public",
+  "application": "blocked",
+  "environment": {
+    "DAG_THREADS": "24",
+    "DAG_MODE": "parallel",
+    "DAG_BATCH": "1",
+    "DAG_BACKEND": "atomic",
+    "DAG_IO_FORMAT": "public",
+    "DAG_APPLICATION": "blocked",
+    "DAG_SCHEDULE": "auto",
+    "DAG_CHECK_THREADS": "8",
+    "DAG_METADATA": "/root/2026-hackathon-source-inference/build/block_cholesky.meta"
+  },
+  "environment_policy": {
+    "clean": true,
+    "removed": {},
+    "inherited": {},
+    "explicit": {
+      "DAG_THREADS": "24",
+      "DAG_MODE": "parallel",
+      "DAG_SCHEDULE": "auto",
+      "DAG_CHECK_THREADS": "8",
+      "DAG_METADATA": "/root/2026-hackathon-source-inference/build/block_cholesky.meta"
+    },
+    "defaults": {
+      "DAG_BATCH": "1",
+      "DAG_BACKEND": "atomic",
+      "DAG_IO_FORMAT": "public",
+      "DAG_APPLICATION": "blocked"
+    },
+    "effective_controls": {
+      "DAG_THREADS": "24",
+      "DAG_MODE": "parallel",
+      "DAG_BATCH": "1",
+      "DAG_BACKEND": "atomic",
+      "DAG_IO_FORMAT": "public",
+      "DAG_APPLICATION": "blocked",
+      "DAG_SCHEDULE": "auto",
+      "DAG_CHECK_THREADS": "8",
+      "DAG_METADATA": "/root/2026-hackathon-source-inference/build/block_cholesky.meta"
+    }
+  },
+  "validation_scope": "Selected checker. Use accept-public20 for the supplied verifier workflow.",
+  "configuration": {
+    "threads": 24,
+    "batch": 1,
+    "mode": "parallel",
+    "backend": "atomic"
+  },
+  "scope": "Each sample is a fresh process; warmups affect OS caches, not reusable process resources.",
+  "summary": {
+    "metadata_bytes": 136,
+    "successful_samples": 3,
+    "full_batch_samples": 3,
+    "measured_samples": 3,
+    "resource_limited_samples": 0,
+    "complete_performance": true,
+    "median_seconds": 3.888253606,
+    "min_seconds": 3.863534402,
+    "max_seconds": 3.892922611
+  },
+  "samples": [
+    {
+      "index": 0,
+      "warmup": false,
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "cases=1 score_seconds=3.8635344 matrix_io_seconds=0.026192935\n",
+      "process_wall_seconds": 3.891983864999929,
+      "score_seconds": 3.863534402,
+      "runtime_stats": {
+        "kernel_mode": "demo-local-debug",
+        "application": "blocked",
+        "io_format": "public",
+        "mode": "parallel",
+        "backend": "atomic",
+        "schedule": "auto",
+        "memory_budget_bytes": 100785500980,
+        "requested_memory_bytes": 0,
+        "graph_budget_bytes": 0,
+        "graph_budget_source": "automatic",
+        "memory_budget_source": "automatic",
+        "threads_requested": 24,
+        "batch": 1,
+        "max_tasks": 0,
+        "max_steps": 0,
+        "metadata_bytes": 136,
+        "score_seconds": 3.863534402,
+        "matrix_io_seconds": 0.026192934999999997,
+        "common_finalize_seconds": 0.005468612000000039,
+        "cpus": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "cases": [
+          {
+            "index": 0,
+            "n": 2048,
+            "b": 1,
+            "execution_mode": "parallel-pattern",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 100692027260,
+            "case_memory_budget_bytes": 100717297724,
+            "tasks": 1433753602,
+            "phase_tasks": 2,
+            "edges": 0,
+            "workers": 24,
+            "steals": 0,
+            "pattern_windows": 7167,
+            "peak_window_tasks": 1024,
+            "graph_bytes": 442368,
+            "prepare_seconds": 0.9602165930000024,
+            "execute_seconds": 2.8764262859999974,
+            "compute_seconds": 3.85806579
+          }
+        ]
+      },
+      "validation": {
+        "returncode": 0,
+        "stdout": "case=0 n=2048 b=1 scaled_residual=0.00337892 status=PASS\n",
+        "stderr": ""
+      },
+      "resource_failures": [],
+      "resource_exclusions": [],
+      "valid_case_indices": [
+        0
+      ],
+      "correctness_passed": true,
+      "resource_limited": false,
+      "full_batch_eligible": true,
+      "failure_class": "none",
+      "case_categories": {
+        "valid": [
+          0
+        ],
+        "resource_limited": [],
+        "completed_unvalidated": [],
+        "resource_failed": [],
+        "not_run": [],
+        "error_or_unknown": []
+      },
+      "case_counts": {
+        "valid": 1,
+        "resource_limited": 0,
+        "completed_unvalidated": 0,
+        "resource_failed": 0,
+        "not_run": 0,
+        "error_or_unknown": 0
+      }
+    },
+    {
+      "index": 1,
+      "warmup": false,
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "cases=1 score_seconds=3.89292261 matrix_io_seconds=0.026345238\n",
+      "process_wall_seconds": 3.921357283999896,
+      "score_seconds": 3.892922611,
+      "runtime_stats": {
+        "kernel_mode": "demo-local-debug",
+        "application": "blocked",
+        "io_format": "public",
+        "mode": "parallel",
+        "backend": "atomic",
+        "schedule": "auto",
+        "memory_budget_bytes": 100766724916,
+        "requested_memory_bytes": 0,
+        "graph_budget_bytes": 0,
+        "graph_budget_source": "automatic",
+        "memory_budget_source": "automatic",
+        "threads_requested": 24,
+        "batch": 1,
+        "max_tasks": 0,
+        "max_steps": 0,
+        "metadata_bytes": 136,
+        "score_seconds": 3.892922611,
+        "matrix_io_seconds": 0.026345237999999997,
+        "common_finalize_seconds": 0.005778762999999909,
+        "cpus": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "cases": [
+          {
+            "index": 0,
+            "n": 2048,
+            "b": 1,
+            "execution_mode": "parallel-pattern",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 100673251196,
+            "case_memory_budget_bytes": 100698521660,
+            "tasks": 1433753602,
+            "phase_tasks": 2,
+            "edges": 0,
+            "workers": 24,
+            "steals": 0,
+            "pattern_windows": 7167,
+            "peak_window_tasks": 1024,
+            "graph_bytes": 442368,
+            "prepare_seconds": 0.9147728959999961,
+            "execute_seconds": 2.9505607390000037,
+            "compute_seconds": 3.887143848
+          }
+        ]
+      },
+      "validation": {
+        "returncode": 0,
+        "stdout": "case=0 n=2048 b=1 scaled_residual=0.00337892 status=PASS\n",
+        "stderr": ""
+      },
+      "resource_failures": [],
+      "resource_exclusions": [],
+      "valid_case_indices": [
+        0
+      ],
+      "correctness_passed": true,
+      "resource_limited": false,
+      "full_batch_eligible": true,
+      "failure_class": "none",
+      "case_categories": {
+        "valid": [
+          0
+        ],
+        "resource_limited": [],
+        "completed_unvalidated": [],
+        "resource_failed": [],
+        "not_run": [],
+        "error_or_unknown": []
+      },
+      "case_counts": {
+        "valid": 1,
+        "resource_limited": 0,
+        "completed_unvalidated": 0,
+        "resource_failed": 0,
+        "not_run": 0,
+        "error_or_unknown": 0
+      }
+    },
+    {
+      "index": 2,
+      "warmup": false,
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "cases=1 score_seconds=3.88825361 matrix_io_seconds=0.027070073\n",
+      "process_wall_seconds": 3.9175454060004995,
+      "score_seconds": 3.888253606,
+      "runtime_stats": {
+        "kernel_mode": "demo-local-debug",
+        "application": "blocked",
+        "io_format": "public",
+        "mode": "parallel",
+        "backend": "atomic",
+        "schedule": "auto",
+        "memory_budget_bytes": 100773442356,
+        "requested_memory_bytes": 0,
+        "graph_budget_bytes": 0,
+        "graph_budget_source": "automatic",
+        "memory_budget_source": "automatic",
+        "threads_requested": 24,
+        "batch": 1,
+        "max_tasks": 0,
+        "max_steps": 0,
+        "metadata_bytes": 136,
+        "score_seconds": 3.888253606,
+        "matrix_io_seconds": 0.027070073,
+        "common_finalize_seconds": 0.006295487000000488,
+        "cpus": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "cases": [
+          {
+            "index": 0,
+            "n": 2048,
+            "b": 1,
+            "execution_mode": "parallel-pattern",
+            "resource_limited": false,
+            "resource_reason": "",
+            "resource_stage": "",
+            "effective_graph_budget_bytes": 100679968636,
+            "case_memory_budget_bytes": 100705239100,
+            "tasks": 1433753602,
+            "phase_tasks": 2,
+            "edges": 0,
+            "workers": 24,
+            "steals": 0,
+            "pattern_windows": 7167,
+            "peak_window_tasks": 1024,
+            "graph_bytes": 442368,
+            "prepare_seconds": 0.9247651450000083,
+            "execute_seconds": 2.9343256519999916,
+            "compute_seconds": 3.8819581189999997
+          }
+        ]
+      },
+      "validation": {
+        "returncode": 0,
+        "stdout": "case=0 n=2048 b=1 scaled_residual=0.00337892 status=PASS\n",
+        "stderr": ""
+      },
+      "resource_failures": [],
+      "resource_exclusions": [],
+      "valid_case_indices": [
+        0
+      ],
+      "correctness_passed": true,
+      "resource_limited": false,
+      "full_batch_eligible": true,
+      "failure_class": "none",
+      "case_categories": {
+        "valid": [
+          0
+        ],
+        "resource_limited": [],
+        "completed_unvalidated": [],
+        "resource_failed": [],
+        "not_run": [],
+        "error_or_unknown": []
+      },
+      "case_counts": {
+        "valid": 1,
+        "resource_limited": 0,
+        "completed_unvalidated": 0,
+        "resource_failed": 0,
+        "not_run": 0,
+        "error_or_unknown": 0
+      }
+    }
+  ],
+  "input_cases": [
+    {
+      "index": 0,
+      "n": 2048,
+      "b": 1
+    }
+  ],
+  "kernel_library": {
+    "path": "/root/2026-hackathon-source-inference/build/libcontest_kernels.a",
+    "sha256": "2fa452b34bd013d8babeeeaf70d4a42fc4520362422922e64c0a17fa7d68d530"
+  },
+  "environment_identity": {
+    "platform": "Linux-6.8.0-106-generic-aarch64-with-glibc2.39",
+    "hostname": "ecs-d072",
+    "cpu_model": "0x48",
+    "affinity": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31
+    ],
+    "rlimit_as": [
+      -1,
+      -1
+    ],
+    "rlimit_data": [
+      -1,
+      -1
+    ],
+    "budgets": {
+      "DAG_MEMORY_MB": null,
+      "DAG_GRAPH_MEMORY_MB": "0",
+      "DAG_MAX_TASKS": "0",
+      "DAG_MAX_STEPS": "0"
+    },
+    "cgroup_constraints": {
+      "membership": "0::/user.slice/user-0.slice/session-170.scope",
+      "mountinfo_available": true,
+      "mounts": [
+        {
+          "type": "cgroup2",
+          "controller": "unified",
+          "root": "/",
+          "mount": "/sys/fs/cgroup",
+          "membership": "/user.slice/user-0.slice/session-170.scope",
+          "namespace_root_fallback": false,
+          "ancestors": [
+            {
+              "path": "/sys/fs/cgroup/user.slice/user-0.slice/session-170.scope",
+              "limits": {
+                "memory.max": "max",
+                "cpuset.cpus": null,
+                "cpuset.mems": null,
+                "cpuset.cpus.effective": null,
+                "cpuset.mems.effective": null
+              }
+            },
+            {
+              "path": "/sys/fs/cgroup/user.slice/user-0.slice",
+              "limits": {
+                "memory.max": "max",
+                "cpuset.cpus": null,
+                "cpuset.mems": null,
+                "cpuset.cpus.effective": null,
+                "cpuset.mems.effective": null
+              }
+            },
+            {
+              "path": "/sys/fs/cgroup/user.slice",
+              "limits": {
+                "memory.max": "max",
+                "cpuset.cpus": null,
+                "cpuset.mems": null,
+                "cpuset.cpus.effective": null,
+                "cpuset.mems.effective": null
+              }
+            },
+            {
+              "path": "/sys/fs/cgroup",
+              "limits": {
+                "memory.max": null,
+                "cpuset.cpus": null,
+                "cpuset.mems": null,
+                "cpuset.cpus.effective": "0-31",
+                "cpuset.mems.effective": "0"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "environment_fingerprint": "4ecbbe49936e61897afb852362b339521a1349cdf29bf90387f490fdef572870",
+  "performance_eligible": true,
+  "evaluation_kind": "performance",
+  "common_case_diagnostic": {
+    "kind": "common_valid_case_compute_sum_diagnostic",
+    "not_full_batch_score": true,
+    "scope": {
+      "input_sha256": "229d1170b23018e403ae279288c61e42792f6991fce7314f7b50e1fb8f89a0d5",
+      "protocol": "public",
+      "application": "blocked",
+      "environment_fingerprint": "4ecbbe49936e61897afb852362b339521a1349cdf29bf90387f490fdef572870",
+      "kernel_sha256": "2fa452b34bd013d8babeeeaf70d4a42fc4520362422922e64c0a17fa7d68d530",
+      "cases": [
+        {
+          "index": 0,
+          "n": 2048,
+          "b": 1
+        }
+      ]
+    },
+    "scope_fingerprint": "65353a710bfacf881fcc0f6ece0942918998719ec49354b74434a4042e201b9f",
+    "case_indices": [
+      0
+    ],
+    "case_count": 1,
+    "total_case_count": 1,
+    "coverage": 1.0,
+    "excluded_case_indices": [],
+    "samples": [
+      {
+        "index": 0,
+        "case_compute_sum_seconds": 3.85806579
+      },
+      {
+        "index": 1,
+        "case_compute_sum_seconds": 3.887143848
+      },
+      {
+        "index": 2,
+        "case_compute_sum_seconds": 3.8819581189999997
+      }
+    ],
+    "resource_exclusions": [],
+    "invalid_samples": [],
+    "case_status_by_sample": [
+      {
+        "sample": 0,
+        "case_categories": {
+          "valid": [
+            0
+          ],
+          "resource_limited": [],
+          "completed_unvalidated": [],
+          "resource_failed": [],
+          "not_run": [],
+          "error_or_unknown": []
+        },
+        "case_counts": {
+          "valid": 1,
+          "resource_limited": 0,
+          "completed_unvalidated": 0,
+          "resource_failed": 0,
+          "not_run": 0,
+          "error_or_unknown": 0
+        }
+      },
+      {
+        "sample": 1,
+        "case_categories": {
+          "valid": [
+            0
+          ],
+          "resource_limited": [],
+          "completed_unvalidated": [],
+          "resource_failed": [],
+          "not_run": [],
+          "error_or_unknown": []
+        },
+        "case_counts": {
+          "valid": 1,
+          "resource_limited": 0,
+          "completed_unvalidated": 0,
+          "resource_failed": 0,
+          "not_run": 0,
+          "error_or_unknown": 0
+        }
+      },
+      {
+        "sample": 2,
+        "case_categories": {
+          "valid": [
+            0
+          ],
+          "resource_limited": [],
+          "completed_unvalidated": [],
+          "resource_failed": [],
+          "not_run": [],
+          "error_or_unknown": []
+        },
+        "case_counts": {
+          "valid": 1,
+          "resource_limited": 0,
+          "completed_unvalidated": 0,
+          "resource_failed": 0,
+          "not_run": 0,
+          "error_or_unknown": 0
+        }
+      }
+    ],
+    "case_sample_counts": {
+      "valid": 3,
+      "resource_limited": 0,
+      "completed_unvalidated": 0,
+      "resource_failed": 0,
+      "not_run": 0,
+      "error_or_unknown": 0
+    },
+    "case_sample_counts_unit": "case appearances across measured samples; not unique cases",
+    "median_case_compute_sum_seconds": 3.8819581189999997
+  },
+  "correctness_passed": true,
+  "passed": true
+}
