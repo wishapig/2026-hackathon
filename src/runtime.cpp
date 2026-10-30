@@ -1,6 +1,5 @@
 #include "dag/core.hpp"
 #include <algorithm>
-#include <array>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -104,36 +103,6 @@ struct alignas(64) Queue {
     std::mutex mutex;
     std::size_t head = none, tail = none, count = 0;
 };
-constexpr unsigned priority_levels = 32;
-struct ReadyBuckets {
-    std::array<std::size_t, priority_levels> head, tail;
-    std::uint32_t nonempty = 0;
-    ReadyBuckets() {
-        head.fill(none);
-        tail.fill(none);
-    }
-};
-unsigned highest_bucket(std::uint32_t mask) {
-    // Called only with nonzero masks, avoiding undefined clz(0).
-    return 31u - static_cast<unsigned>(__builtin_clz(mask));
-}
-std::uint64_t saturated_add(std::uint64_t a, std::uint64_t b) {
-    const auto maximum = std::numeric_limits<std::uint64_t>::max();
-    return b > maximum - a ? maximum : a + b;
-}
-std::uint64_t access_work(const Task &task) {
-    // A generic volume proxy, not a claim of measured operator FLOPs.
-    // Aliased reads intentionally count as accesses; this affects only order.
-    std::uint64_t work = 0;
-    for (const auto *regions : {&task.reads, &task.writes})
-        for (const auto &r : *regions) {
-            const auto volume = static_cast<unsigned __int128>(r.rows) * r.cols;
-            const auto cap = std::numeric_limits<std::uint64_t>::max();
-            work = saturated_add(work, volume > cap ? cap : static_cast<std::uint64_t>(volume));
-        }
-    return std::max(std::uint64_t(1), work);
-}
-
 } // namespace
 
 std::vector<unsigned> allowed_node_cpus() {
@@ -177,9 +146,6 @@ struct Executor::Impl {
     };
     std::vector<ThreadArg> arguments;
     std::unique_ptr<Queue[]> ready, inbox;
-    std::unique_ptr<ReadyBuckets[]> ready_buckets;
-    std::unique_ptr<std::uint8_t[]> task_bucket;
-    std::size_t priority_count = 0;
     std::vector<std::size_t> next, prev, event_next;
     std::unique_ptr<std::atomic<std::uint32_t>[]> remaining;
     std::unique_ptr<std::atomic<unsigned char>[]> seen;
@@ -273,26 +239,13 @@ struct Executor::Impl {
         auto &q = ready[owner];
         {
             std::lock_guard<std::mutex> lock(q.mutex);
-            if (ready_buckets) {
-                auto &bins = ready_buckets[owner];
-                const auto b = task_bucket[id];
-                next[id] = none;
-                prev[id] = bins.tail[b];
-                if (bins.tail[b] == none)
-                    bins.head[b] = id;
-                else
-                    next[bins.tail[b]] = id;
-                bins.tail[b] = id;
-                bins.nonempty |= std::uint32_t(1) << b;
-            } else {
-                next[id] = none;
-                prev[id] = q.tail;
-                if (q.tail == none)
-                    q.head = id;
-                else
-                    next[q.tail] = id;
-                q.tail = id;
-            }
+            next[id] = none;
+            prev[id] = q.tail;
+            if (q.tail == none)
+                q.head = id;
+            else
+                next[q.tail] = id;
+            q.tail = id;
             ++q.count;
         }
         notify_work();
@@ -300,30 +253,6 @@ struct Executor::Impl {
     std::size_t pop(unsigned owner, bool steal) {
         auto &q = ready[owner];
         std::lock_guard<std::mutex> lock(q.mutex);
-        if (ready_buckets) {
-            auto &bins = ready_buckets[owner];
-            if (!bins.nonempty)
-                return none;
-            const auto b = highest_bucket(bins.nonempty);
-            const auto id = steal ? bins.head[b] : bins.tail[b];
-            if (steal) {
-                bins.head[b] = next[id];
-                if (bins.head[b] == none)
-                    bins.tail[b] = none;
-                else
-                    prev[bins.head[b]] = none;
-            } else {
-                bins.tail[b] = prev[id];
-                if (bins.tail[b] == none)
-                    bins.head[b] = none;
-                else
-                    next[bins.tail[b]] = none;
-            }
-            if (bins.head[b] == none)
-                bins.nonempty &= ~(std::uint32_t(1) << b);
-            --q.count;
-            return id;
-        }
         if (q.head == none)
             return none;
         const auto id = steal ? q.head : q.tail;
@@ -342,13 +271,6 @@ struct Executor::Impl {
         }
         --q.count;
         return id;
-    }
-    bool queued_above(unsigned owner, std::size_t continuation) {
-        if (!ready_buckets)
-            return false;
-        std::lock_guard<std::mutex> lock(ready[owner].mutex);
-        const auto mask = ready_buckets[owner].nonempty;
-        return mask && highest_bucket(mask) > task_bucket[continuation];
     }
     bool ready_after_decrement(std::uint32_t target) {
         std::uint32_t old;
@@ -426,10 +348,10 @@ struct Executor::Impl {
             bool progress = options.backend == "owner" ? poll(worker) : false;
             for (unsigned batch = 0; batch < options.batch; ++batch) {
                 // Periodically publish the continuation and take the oldest
-                // task (within the highest bucket when priority is enabled).
+                // task, preserving the queue's existing anti-starvation rule.
                 const bool oldest = ((round_robin++) % 32) == 0;
                 std::size_t id;
-                if (continuation != none && !oldest && !queued_above(worker, continuation)) {
+                if (continuation != none && !oldest) {
                     id = continuation;
                     continuation = none;
                 } else {
@@ -472,16 +394,11 @@ struct Executor::Impl {
                     const auto target = graph->successors[e];
                     if (options.backend == "atomic") {
                         if (ready_after_decrement(target)) {
-                            // Retain the highest-bucket ready successor. Ties
-                            // keep existing LIFO behavior (newest is retained).
-                            if (continuation == none)
-                                continuation = target;
-                            else if (ready_buckets && task_bucket[continuation] > task_bucket[target])
-                                push(worker, target);
-                            else {
+                            // Match local LIFO ordering: retain the newest
+                            // successor, publish earlier ones for other workers.
+                            if (continuation != none)
                                 push(worker, continuation);
-                                continuation = target;
-                            }
+                            continuation = target;
                         }
                     } else {
                         const auto owner = target % workers;
@@ -562,9 +479,6 @@ struct Executor::Impl {
         bytes =
             checked_add(bytes, checked_mul(remaining_count, sizeof(std::atomic<std::uint32_t>)));
         bytes = checked_add(bytes, checked_mul(seen_count, sizeof(std::atomic<unsigned char>)));
-        bytes = checked_add(bytes, checked_mul(priority_count, sizeof(std::uint8_t)));
-        if (ready_buckets)
-            bytes = checked_add(bytes, checked_mul(workers, sizeof(ReadyBuckets)));
         return bytes;
     }
     std::size_t reservation() const {
@@ -577,9 +491,6 @@ struct Executor::Impl {
         std::vector<std::size_t>().swap(event_next);
         remaining.reset();
         seen.reset();
-        task_bucket.reset();
-        ready_buckets.reset();
-        priority_count = 0;
         remaining_count = seen_count = 0;
     }
     void set_budget(std::size_t bytes) {
@@ -612,12 +523,6 @@ struct Executor::Impl {
                                          (options.audit ? sizeof(std::atomic<unsigned char>) : 0)));
         if (options.backend == "owner")
             estimate = checked_add(estimate, checked_mul(g.successors.size(), sizeof(std::size_t)));
-        if (options.critical_path) {
-            // Include both persistent buckets and the transient rank array,
-            // which coexists with structural validation before numerical work.
-            estimate = checked_add(estimate, checked_mul(n, sizeof(std::uint8_t) + sizeof(std::uint64_t)));
-            estimate = checked_add(estimate, checked_mul(workers, sizeof(ReadyBuckets)));
-        }
         if (estimate > options.memory_bytes)
             throw ResourceLimit("graph and executor exceed runtime memory budget");
         // Previous execution has fully drained; release its arrays before new allocation.
@@ -641,26 +546,6 @@ struct Executor::Impl {
         }
         if (check != g.indegrees)
             throw std::runtime_error("incorrect graph indegrees");
-        if (options.critical_path && n) {
-            // Edge validation above proves dst>src, so reverse ID order is a
-            // reverse topological order. All rank arithmetic is saturating: a
-            // huge work estimate may reduce priority precision, never overflow.
-            std::vector<std::uint64_t> rank(n, 0);
-            std::uint64_t maximum = 0;
-            for (std::size_t src = n; src-- > 0;) {
-                std::uint64_t after = 0;
-                for (auto e = g.offsets[src]; e < g.offsets[src + 1]; ++e)
-                    after = std::max(after, rank[g.successors[e]]);
-                rank[src] = saturated_add(access_work(g.tasks[src]), after);
-                maximum = std::max(maximum, rank[src]);
-            }
-            task_bucket = std::make_unique<std::uint8_t[]>(n);
-            priority_count = n;
-            ready_buckets = std::make_unique<ReadyBuckets[]>(workers);
-            for (std::size_t i = 0; i < n; ++i)
-                task_bucket[i] = static_cast<std::uint8_t>(
-                    static_cast<unsigned __int128>(rank[i]) * (priority_levels - 1) / maximum);
-        }
         next.assign(n, none);
         prev.assign(n, none);
         remaining = std::make_unique<std::atomic<std::uint32_t>[]>(n);

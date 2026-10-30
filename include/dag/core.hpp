@@ -81,7 +81,6 @@ struct RuntimeOptions {
     bool pin = true;
     bool audit = false;
     std::size_t memory_bytes = 512ull * 1024 * 1024;
-    bool critical_path = false; // optional graph-derived ready-task priorities
 };
 struct ExecutionStats {
     std::uint64_t tasks = 0, edges = 0, steals = 0;
