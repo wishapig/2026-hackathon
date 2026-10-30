@@ -29,7 +29,6 @@ struct Node {
     std::vector<Node> body, otherwise;
 };
 struct Program {
-    std::string source_digest, contract_digest;
     std::vector<std::string> operators;
     std::vector<Node> nodes;
     std::vector<Expr> parameter_guards;

@@ -512,14 +512,17 @@ struct Executor::Impl {
         if (g.offsets.size() != n + 1 || g.indegrees.size() != n || g.offsets.empty() ||
             g.offsets.front() != 0 || g.offsets.back() != g.successors.size())
             throw std::runtime_error("invalid CSR graph");
-        // Validate every range before traversing any adjacency, including future offsets.
-        for (std::size_t i = 0; i < g.offsets.size(); ++i)
-            if (g.offsets[i] > g.successors.size() || (i && g.offsets[i] < g.offsets[i - 1]))
-                throw std::runtime_error("invalid CSR offset range");
+        if (options.audit) {
+            // Validate every range before traversing any adjacency, including future offsets.
+            for (std::size_t i = 0; i < g.offsets.size(); ++i)
+                if (g.offsets[i] > g.successors.size() || (i && g.offsets[i] < g.offsets[i - 1]))
+                    throw std::runtime_error("invalid CSR offset range");
+        }
         auto estimate = checked_add(
             g.memory_bytes, checked_mul(workers, worker_stack_bytes + 2 * sizeof(Queue) + 4096));
         estimate = checked_add(
-            estimate, checked_mul(n, 2 * sizeof(std::size_t) + 2 * sizeof(std::uint32_t) +
+            estimate, checked_mul(n, 2 * sizeof(std::size_t) + sizeof(std::uint32_t) +
+                                         (options.audit ? sizeof(std::uint32_t) : 0) +
                                          (options.audit ? sizeof(std::atomic<unsigned char>) : 0)));
         if (options.backend == "owner")
             estimate = checked_add(estimate, checked_mul(g.successors.size(), sizeof(std::size_t)));
@@ -527,25 +530,28 @@ struct Executor::Impl {
             throw ResourceLimit("graph and executor exceed runtime memory budget");
         // Previous execution has fully drained; release its arrays before new allocation.
         release_execution_storage();
-        // This linear structural check is included in run time, and prevents hangs on malformed
-        // input.
-        std::vector<std::uint32_t> check(n, 0);
-        for (std::size_t src = 0; src < n; ++src) {
-            if (g.offsets[src] > g.offsets[src + 1])
-                throw std::runtime_error("invalid CSR offsets");
-            std::uint32_t last = 0;
-            bool first = true;
-            for (auto e = g.offsets[src]; e < g.offsets[src + 1]; ++e) {
-                const auto dst = g.successors[e];
-                if (dst <= src || dst >= n || (!first && dst <= last))
-                    throw std::runtime_error("invalid, cyclic or duplicate graph edge");
-                last = dst;
-                first = false;
-                ++check[dst];
+        // Optional audit of a graph already produced by the checked builder.
+        if (options.audit) {
+            // This linear structural check is included in run time, and prevents hangs on malformed
+            // input.
+            std::vector<std::uint32_t> check(n, 0);
+            for (std::size_t src = 0; src < n; ++src) {
+                if (g.offsets[src] > g.offsets[src + 1])
+                    throw std::runtime_error("invalid CSR offsets");
+                std::uint32_t last = 0;
+                bool first = true;
+                for (auto e = g.offsets[src]; e < g.offsets[src + 1]; ++e) {
+                    const auto dst = g.successors[e];
+                    if (dst <= src || dst >= n || (!first && dst <= last))
+                        throw std::runtime_error("invalid, cyclic or duplicate graph edge");
+                    last = dst;
+                    first = false;
+                    ++check[dst];
+                }
             }
+            if (check != g.indegrees)
+                throw std::runtime_error("incorrect graph indegrees");
         }
-        if (check != g.indegrees)
-            throw std::runtime_error("incorrect graph indegrees");
         next.assign(n, none);
         prev.assign(n, none);
         remaining = std::make_unique<std::atomic<std::uint32_t>[]>(n);

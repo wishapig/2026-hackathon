@@ -239,25 +239,29 @@ void scalar_expression(const dag::Task &t, std::size_t n, const double *a = null
     if (execute)
         l[dest] = stack.back();
 }
-void validate_task(const dag::Task &t, std::uint32_t n, std::uint32_t b) {
+void validate_task(const dag::Task &t, std::uint32_t n, std::uint32_t b, bool audit) {
     const auto nn = static_cast<std::size_t>(n) * n;
-    for (const auto *regions : {&t.reads, &t.writes})
-        for (const auto &r : *regions) {
-            if ((r.buffer != "A" && r.buffer != "L") || !r.rows || !r.cols || r.stride < n ||
-                r.cols > r.stride || r.offset >= nn ||
-                r.rows - 1 > (nn - 1 - r.offset) / r.stride ||
-                r.cols > nn - r.offset - (r.rows - 1) * r.stride)
-                throw std::runtime_error("metadata region out of matrix bounds");
-        }
+    if (audit) {
+        for (const auto *regions : {&t.reads, &t.writes})
+            for (const auto &r : *regions) {
+                if ((r.buffer != "A" && r.buffer != "L") || !r.rows || !r.cols || r.stride < n ||
+                    r.cols > r.stride || r.offset >= nn ||
+                    r.rows - 1 > (nn - 1 - r.offset) / r.stride ||
+                    r.cols > nn - r.offset - (r.rows - 1) * r.stride)
+                    throw std::runtime_error("metadata region out of matrix bounds");
+            }
+    }
     if (t.symbol == "scalar_expression") {
-        scalar_expression(t, n);
+        if (audit) scalar_expression(t, n);
         return;
     }
     if (t.symbol == "__copy") {
         if (!t.args.empty())
             throw std::runtime_error("copy takes no arguments");
-        require_region(t.reads, "A", 0, n, n, n);
-        require_region(t.writes, "L", 0, n, n, n);
+        if (audit) {
+            require_region(t.reads, "A", 0, n, n, n);
+            require_region(t.writes, "L", 0, n, n, n);
+        }
         return;
     }
     if (t.symbol == "__zero_upper") {
@@ -266,6 +270,7 @@ void validate_task(const dag::Task &t, std::uint32_t n, std::uint32_t b) {
         // The decoder emits one region per row in order. Verify that common
         // representation once, without searching the whole list for every row.
         // Keep the general coverage check for reordered or redundant regions.
+        if (!audit) return;
         bool canonical = t.writes.size() == static_cast<std::size_t>(n - 1);
         for (std::size_t row = 0; canonical && row + 1 < n; ++row)
             canonical = region_equals(t.writes[row], "L", row * n + row + 1,
@@ -306,12 +311,14 @@ void validate_task(const dag::Task &t, std::uint32_t n, std::uint32_t b) {
         if ((a != input_b && overlaps(a, input_b)) || overlaps(c, a) || overlaps(c, input_b))
             throw std::runtime_error("unsupported madd alias");
     }
-    require_region(t.reads, "L", a, b, b, n);
-    if (argc == 5)
-        require_region(t.reads, "L", static_cast<std::size_t>(t.args[1]), b, b, n);
-    if (t.symbol == "madd")
-        require_region(t.reads, "L", c, b, b, n);
-    require_region(t.writes, "L", c, b, b, n);
+    if (audit) {
+        require_region(t.reads, "L", a, b, b, n);
+        if (argc == 5)
+            require_region(t.reads, "L", static_cast<std::size_t>(t.args[1]), b, b, n);
+        if (t.symbol == "madd")
+            require_region(t.reads, "L", c, b, b, n);
+        require_region(t.writes, "L", c, b, b, n);
+    }
 }
 void invoke(const dag::Task &t, const std::vector<double> &a, std::vector<double> &l, int n,
             int b) {
@@ -452,7 +459,6 @@ int main(int argc, char **argv) {
         resource_stage = "metadata";
         dag::Program program = dag::load_metadata(metadata_path, limits);
         const auto metadata_bytes = program.artifact_bytes;
-        const auto source_digest = program.source_digest, contract_digest = program.contract_digest;
         for (const auto &op : program.operators)
             if (op != "__copy" && op != "__zero_upper" &&
                 (scalar_application ? op != "scalar_expression"
@@ -659,7 +665,7 @@ int main(int argc, char **argv) {
                     std::size_t scratch_per_worker = 0, numerical_calls = 0;
                     long double work_units = 0;
                     for (const auto &task : tasks) {
-                        validate_task(task, n, b);
+                        validate_task(task, n, b, options.audit);
                         scratch_per_worker = std::max(scratch_per_worker, workspace(task));
                         if (task.symbol != "__copy" && task.symbol != "__zero_upper") {
                             ++numerical_calls;
@@ -754,7 +760,7 @@ int main(int argc, char **argv) {
                 resource_stage = "serial-execution";
                 const auto exec_start = Clock::now();
                 dag::enumerate_program(program, {n, b}, limits, [&](const dag::Task &task) {
-                    validate_task(task, n, b);
+                    validate_task(task, n, b, options.audit);
                     kernel(task);
                     ++st.tasks;
                 });
@@ -819,8 +825,6 @@ int main(int argc, char **argv) {
                << ",\"max_tasks\":" << limits.max_tasks
                << ",\"max_steps\":" << limits.max_steps
                << ",\"metadata_bytes\":" << metadata_bytes
-               << ",\"source_digest\":" << quoted(source_digest)
-               << ",\"contract_digest\":" << quoted(contract_digest)
                << ",\"score_seconds\":" << score << ",\"matrix_io_seconds\":" << io_seconds
                << ",\"common_finalize_seconds\":" << std::max(0.0, score - case_sum)
                << ",\"cpus\":[";

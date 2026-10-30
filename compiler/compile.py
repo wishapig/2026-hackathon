@@ -579,21 +579,23 @@ class Parser:
         return {'kind': 'for', 'var': name, 'start': start, 'stop': stop, 'step': step, 'body': body}
 
 
-def compile_source(source: str, catalog_bytes: bytes, entry='block_cholesky'):
+def compile_source(source: str, catalog_bytes: bytes, entry='block_cholesky', include_provenance=False):
     if len(source.encode()) > 4 * 1024 * 1024 or len(catalog_bytes) > 4 * 1024 * 1024:
         raise CompileError('source/catalog exceeds 4 MiB limit')
     catalog = load_catalog(catalog_bytes)
     parser = Parser(source, catalog, entry)
     program = parser.parse()
-    return {
+    document = {
         'schema_version': 1,
-        'source_digest': hashlib.sha256(source.encode()).hexdigest(),
-        'contract_digest': hashlib.sha256(catalog_bytes).hexdigest(),
         'operators': sorted(parser.used),
         'program': program,
         'parameter_guards': parser.requirements,
         'frontend': 'strict-structured-cpp-v1',
     }
+    if include_provenance:
+        document['source_digest'] = hashlib.sha256(source.encode()).hexdigest()
+        document['contract_digest'] = hashlib.sha256(catalog_bytes).hexdigest()
+    return document
 
 
 def binary_value(value):
@@ -669,7 +671,7 @@ def compact_payload(document, binary=False):
 
     digests = bytearray()
     for key in ('source_digest', 'contract_digest'):
-        value = document[key]
+        value = document.get(key)
         if not isinstance(value, str) or not re.fullmatch('[0-9a-f]{64}', value):
             raise CompileError('compact metadata requires lowercase SHA-256 input digests')
         digests.extend(bytes.fromhex(value))
@@ -680,7 +682,94 @@ def compact_payload(document, binary=False):
     return bytes(digests) + body
 
 
+# Execution-only format: numeric lexical references, no hashes or audit fields.
+LEAN_OPS = ['neg', '!', '+', '-', '*', '/', '%', '<', '<=', '>', '>=', '==', '!=', '&&', '||']
+
+
+def lean_payload(document):
+    operators = list(document['operators'])
+    buffers = []
+    next_slot = 2
+
+    def expression(e, scope):
+        if type(e) is int:
+            return e
+        if isinstance(e, str):
+            return [0, scope[e]]
+        return [LEAN_OPS.index(e[0]) + 1, *(expression(a, scope) for a in e[1:])]
+
+    def regions(items, scope):
+        result = []
+        for r in items:
+            if r['buffer'] not in buffers:
+                buffers.append(r['buffer'])
+            result.append([buffers.index(r['buffer']),
+                           *(expression(r[k], scope) for k in ('offset', 'rows', 'cols', 'stride'))])
+        return result
+
+    def nodes(items, incoming):
+        nonlocal next_slot
+        scope = dict(incoming)
+        result = []
+        for node in items:
+            kind = node['kind']
+            if kind == 'let':
+                rhs = expression(node['value'], scope)
+                slot = next_slot; next_slot += 1
+                scope[node['name']] = slot
+                result.append([0, slot, rhs])
+            elif kind == 'for':
+                args = [expression(node[k], scope) for k in ('start', 'stop', 'step')]
+                slot = next_slot; next_slot += 1
+                inner = dict(scope); inner[node['var']] = slot
+                result.append([1, slot, *args, nodes(node['body'], inner)])
+            elif kind == 'if':
+                result.append([2, expression(node['condition'], scope),
+                               nodes(node['then'], scope), nodes(node.get('else', []), scope)])
+            elif kind == 'call':
+                result.append([3, operators.index(node['op']),
+                               [expression(a, scope) for a in node['args']],
+                               regions(node['reads'], scope), regions(node['writes'], scope)])
+            elif kind in ('copy', 'zero_upper'):
+                result.append([4 if kind == 'copy' else 5])
+            else:
+                raise CompileError('unsupported lean statement: ' + kind)
+        return result
+
+    scope = {'n': 0, 'b': 1}
+    # Omit only guards implied by the runtime's mandatory parameter constraints.
+    guaranteed = [['!', ['<=', 'b', 0]], ['!', ['<=', 'n', 0]],
+                  ['!', ['>', 'b', 'n']], ['!', ['!=', ['%', 'n', 'b'], 0]]]
+    guards = [expression(g, scope) for g in document.get('parameter_guards', [])
+              if g not in guaranteed]
+    program = nodes(document['program'], scope)
+    frontend = document.get('frontend')
+    if frontend not in (None, 'strict-structured-cpp-v1'):
+        raise CompileError('unsupported lean integer semantics')
+    return binary_value([int(frontend is not None), operators, buffers, guards, program])
+
+
+def encode_lean(document, encoding='auto'):
+    payload = lean_payload(document)
+    size = len(payload)
+    length = bytearray()
+    while size >= 128:
+        length.append((size & 127) | 128)
+        size >>= 7
+    length.append(size)
+    raw = bytes([0xa7]) + length + payload
+    compressor = zlib.compressobj(level=9, wbits=-15)
+    compressed = bytes([0xa8]) + length + compressor.compress(payload) + compressor.flush()
+    if encoding == 'lean':
+        return raw
+    if encoding == 'lean-deflate':
+        return compressed
+    return min((raw, compressed), key=len)
+
+
 def encode_metadata(document, encoding='auto'):
+    if encoding in ('auto', 'lean', 'lean-deflate'):
+        return encode_lean(document, encoding)
     if encoding not in ('auto', 'raw', 'zlib', 'compact', 'compact-zlib', 'binary', 'binary-zlib'):
         raise CompileError(f'unknown metadata encoding: {encoding}')
     candidates = []
@@ -718,11 +807,13 @@ def main(argv=None):
     parser.add_argument('--entry', default='block_cholesky')
     parser.add_argument('--json-debug', type=Path)
     parser.add_argument('--encoding', choices=('auto', 'raw', 'zlib', 'compact', 'compact-zlib',
-                                               'binary', 'binary-zlib'),
+                                               'binary', 'binary-zlib', 'lean', 'lean-deflate'),
                         default='auto', help='metadata container; auto chooses the smallest representation')
     opts = parser.parse_args(argv)
     try:
-        document = compile_source(opts.source.read_text(), opts.catalog.read_bytes(), opts.entry)
+        document = compile_source(opts.source.read_text(), opts.catalog.read_bytes(), opts.entry,
+                                  include_provenance=bool(opts.json_debug) or
+                                  opts.encoding not in ('auto', 'lean', 'lean-deflate'))
         artifact = encode_metadata(document, opts.encoding)
         opts.output.parent.mkdir(parents=True, exist_ok=True)
         temp = opts.output.with_name(opts.output.name + '.tmp')

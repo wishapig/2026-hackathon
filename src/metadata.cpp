@@ -527,8 +527,7 @@ std::size_t node_bytes(const Node &n) {
     return bytes;
 }
 std::size_t program_bytes(const Program &p) {
-    std::size_t bytes =
-        sizeof(Program) + p.source_digest.capacity() + p.contract_digest.capacity() + 2;
+    std::size_t bytes = sizeof(Program);
     bytes += p.nodes.capacity() * sizeof(Node) + p.operators.capacity() * sizeof(std::string) +
              p.parameter_guards.capacity() * sizeof(Expr);
     for (const auto &op : p.operators)
@@ -550,6 +549,150 @@ Int narrow(__int128 x) {
     if (x < std::numeric_limits<Int>::min() || x > std::numeric_limits<Int>::max())
         throw std::runtime_error("integer expression overflow");
     return static_cast<Int>(x);
+}
+
+// Lean containers carry only semantics. The names below are internal identities
+// for the existing lexical lowerer, not original source names or audit strings.
+std::string lean_variable(Int slot) {
+    if (slot < 0)
+        throw std::runtime_error("invalid variable slot");
+    return slot == 0 ? "n" : slot == 1 ? "b" : "v" + std::to_string(slot);
+}
+Expr lean_expression(const Json &j) {
+    Expr e;
+    if (const auto n = std::get_if<Int>(&j.v)) {
+        e.op = "literal";
+        e.value = *n;
+        return e;
+    }
+    const auto &a = j.arr();
+    if (a.empty())
+        throw std::runtime_error("empty expression");
+    const auto code = a[0].number();
+    if (code == 0) {
+        if (a.size() != 2) throw std::runtime_error("invalid variable reference");
+        e.op = "variable";
+        e.name = lean_variable(a[1].number());
+        return e;
+    }
+    static const char *ops[] = {"neg", "!", "+", "-", "*", "/", "%",
+        "<", "<=", ">", ">=", "==", "!=", "&&", "||"};
+    if (code < 1 || code > 15 || a.size() != (code <= 2 ? 2u : 3u))
+        throw std::runtime_error("invalid expression opcode");
+    e.op = ops[code - 1];
+    for (std::size_t i = 1; i < a.size(); ++i)
+        e.args.push_back(lean_expression(a[i]));
+    return e;
+}
+std::vector<RegionExpr> lean_regions(const Json &j, const std::vector<std::string> &buffers) {
+    std::vector<RegionExpr> result;
+    for (const auto &item : j.arr()) {
+        const auto &a = compact_array(item, 5);
+        const auto id = a[0].number();
+        if (id < 0 || static_cast<std::size_t>(id) >= buffers.size())
+            throw std::runtime_error("invalid buffer reference");
+        result.push_back({buffers[static_cast<std::size_t>(id)], lean_expression(a[1]),
+            lean_expression(a[2]), lean_expression(a[3]), lean_expression(a[4])});
+    }
+    return result;
+}
+std::vector<Node> lean_nodes(const Json &j, const std::vector<std::string> &operators,
+                             const std::vector<std::string> &buffers) {
+    std::vector<Node> result;
+    for (const auto &item : j.arr()) {
+        const auto &a = item.arr();
+        if (a.empty()) throw std::runtime_error("empty statement");
+        const auto tag = a[0].number();
+        const auto count = tag == 0 ? 3u : tag == 1 ? 6u : tag == 2 ? 4u :
+                           tag == 3 ? 5u : tag == 4 || tag == 5 ? 1u : 0u;
+        if (!count || a.size() != count) throw std::runtime_error("invalid statement");
+        Node n{};
+        switch (tag) {
+        case 0:
+            n.kind = Node::Kind::Let; n.name = lean_variable(a[1].number());
+            n.value = lean_expression(a[2]); break;
+        case 1:
+            n.kind = Node::Kind::For; n.name = lean_variable(a[1].number());
+            n.start = lean_expression(a[2]); n.stop = lean_expression(a[3]);
+            n.step = lean_expression(a[4]); n.body = lean_nodes(a[5], operators, buffers); break;
+        case 2:
+            n.kind = Node::Kind::If; n.condition = lean_expression(a[1]);
+            n.body = lean_nodes(a[2], operators, buffers);
+            n.otherwise = lean_nodes(a[3], operators, buffers); break;
+        case 3: {
+            n.kind = Node::Kind::Call;
+            const auto id = a[1].number();
+            if (id < 0 || static_cast<std::size_t>(id) >= operators.size())
+                throw std::runtime_error("invalid operator reference");
+            n.symbol = operators[static_cast<std::size_t>(id)];
+            for (const auto &x : a[2].arr()) n.args.push_back(lean_expression(x));
+            n.reads = lean_regions(a[3], buffers); n.writes = lean_regions(a[4], buffers); break;
+        }
+        case 4: n.kind = Node::Kind::Copy; break;
+        case 5: n.kind = Node::Kind::ZeroUpper; break;
+        }
+        result.push_back(std::move(n));
+    }
+    return result;
+}
+Program load_lean(std::ifstream &in, std::size_t size, bool compressed, const Limits &limits) {
+    std::size_t length = 0, header = 1;
+    unsigned shift = 0;
+    for (;;) {
+        const auto byte = in.get();
+        if (byte < 0 || shift >= 63 || static_cast<std::size_t>(byte & 127) >
+            (std::numeric_limits<std::size_t>::max() >> shift))
+            throw std::runtime_error("invalid metadata length");
+        ++header;
+        length |= static_cast<std::size_t>(byte & 127) << shift;
+        if (!(byte & 128)) break;
+        shift += 7;
+    }
+    if (header > size || !length) throw std::runtime_error("empty metadata");
+    if (length > limits.memory_bytes / 32 || size > limits.memory_bytes / 32)
+        throw ResourceLimit("metadata exceeds memory budget");
+    std::string stored(size - header, '\0');
+    in.read(stored.data(), static_cast<std::streamsize>(stored.size()));
+    if (!in) throw std::runtime_error("truncated metadata");
+    std::string payload;
+    if (compressed) {
+        if (length > std::numeric_limits<uInt>::max() || stored.size() > std::numeric_limits<uInt>::max())
+            throw ResourceLimit("compressed metadata exceeds decoder capacity");
+        if (limits.memory_bytes < 128 * 1024 ||
+            length + stored.size() > limits.memory_bytes - 128 * 1024)
+            throw ResourceLimit("metadata decoder workspace exceeds budget");
+        payload.resize(length);
+        z_stream stream{};
+        stream.next_in = reinterpret_cast<Bytef *>(stored.data());
+        stream.avail_in = static_cast<uInt>(stored.size());
+        stream.next_out = reinterpret_cast<Bytef *>(payload.data());
+        stream.avail_out = static_cast<uInt>(payload.size());
+        const auto start = inflateInit2(&stream, -15);
+        if (start == Z_MEM_ERROR) throw std::bad_alloc();
+        if (start != Z_OK) throw std::runtime_error("cannot initialize metadata decoder");
+        const auto status = inflate(&stream, Z_FINISH);
+        const bool complete = status == Z_STREAM_END && stream.total_out == length && !stream.avail_in;
+        inflateEnd(&stream);
+        if (status == Z_MEM_ERROR) throw std::bad_alloc();
+        if (!complete) throw std::runtime_error("invalid compressed metadata");
+    } else {
+        if (stored.size() != length) throw std::runtime_error("metadata length mismatch");
+        payload = std::move(stored);
+    }
+    const auto parsed = BinaryParser(payload, limits.memory_bytes / 256).parse();
+    const auto &a = compact_array(parsed, 5);
+    Program result;
+    result.source_int32 = a[0].number() != 0;
+    for (const auto &x : a[1].arr()) result.operators.push_back(x.str());
+    std::vector<std::string> buffers;
+    for (const auto &x : a[2].arr()) buffers.push_back(x.str());
+    for (const auto &x : a[3].arr()) result.parameter_guards.push_back(lean_expression(x));
+    result.nodes = lean_nodes(a[4], result.operators, buffers);
+    result.artifact_bytes = size;
+    result.retained_bytes = program_bytes(result);
+    if (result.retained_bytes > limits.memory_bytes)
+        throw ResourceLimit("decoded metadata exceeds memory budget");
+    return result;
 }
 // Lower once per enumeration, then use integer opcodes and lexical slots in
 // the hot loop. The public Program stays immutable and remains the source of
@@ -877,6 +1020,12 @@ Program load_metadata(const std::string &path, const Limits &limits) {
     if (!in)
         throw std::runtime_error("cannot open metadata: " + path);
     auto size = in.tellg();
+    if (size >= 2) {
+        in.seekg(0);
+        const auto marker = in.get();
+        if (marker == 0xa7 || marker == 0xa8)
+            return load_lean(in, static_cast<std::size_t>(size), marker == 0xa8, limits);
+    }
     // Reserve space for parser/tree overhead as well as source bytes.
     if (size < 24 || static_cast<std::uint64_t>(size) > 64ull * 1024 * 1024)
         throw std::runtime_error("metadata size violation");
@@ -948,8 +1097,6 @@ Program load_metadata(const std::string &path, const Limits &limits) {
     if (root.at("schema_version").number() != 1)
         throw std::runtime_error("unsupported metadata schema");
     Program result;
-    result.source_digest = root.at("source_digest").str();
-    result.contract_digest = root.at("contract_digest").str();
     result.artifact_bytes = static_cast<std::size_t>(size);
     std::set<std::string> ops;
     for (auto &x : root.at("operators").arr()) {
