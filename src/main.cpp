@@ -13,11 +13,13 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <new>
 #include <optional>
 #include <sched.h>
 #include <sstream>
 #include <string>
 #include <sys/resource.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #include <vector>
 
@@ -326,22 +328,77 @@ void validate_task(const dag::Task &t, std::uint32_t n, std::uint32_t b, bool au
 // value-initialized vector: its first-touch costs cannot hide inside file I/O.
 class OutputBuffer {
     std::unique_ptr<double[]> storage;
-    std::size_t count = 0;
+    double *aligned_storage = nullptr;
+    std::size_t count = 0, reserved_elements = 0, alignment = 0;
+    std::size_t page_bytes = 0, huge_bytes = 0;
 
   public:
-    double *data() { return storage.get(); }
+    struct Plan {
+        std::size_t bytes = 0, extra = 0;
+    };
+    OutputBuffer() {
+        // A performance policy probe, once per process and inside scored time.
+        // Unsupported/disabled THP preserves the ordinary allocation path.
+        const auto page = ::sysconf(_SC_PAGESIZE);
+        std::ifstream policy("/sys/kernel/mm/transparent_hugepage/enabled");
+        std::ifstream size("/sys/kernel/mm/transparent_hugepage/hpage_pmd_size");
+        std::string text;
+        std::size_t huge = 0;
+        if (page > 0 && std::getline(policy, text) && size >> huge &&
+            (text.find("[always]") != std::string::npos || text.find("[madvise]") != std::string::npos) &&
+            huge >= static_cast<std::size_t>(page) && !(huge & (huge - 1)) &&
+            huge % static_cast<std::size_t>(page) == 0) {
+            page_bytes = static_cast<std::size_t>(page);
+            huge_bytes = huge;
+        }
+    }
+    ~OutputBuffer() { reset(); }
+    double *data() { return aligned_storage ? aligned_storage : storage.get(); }
     double *begin() { return data(); }
     double *end() { return count ? data() + count : data(); }
     std::size_t size() const { return count; }
-    std::size_t capacity() const { return count; }
-    void reset() {
-        storage.reset();
-        count = 0;
+    std::size_t capacity() const { return reserved_elements; }
+    Plan plan(std::size_t elements, std::size_t available) const {
+        if (count || !huge_bytes) return {};
+        const auto bytes = elements * sizeof(double);
+        if (bytes < huge_bytes || bytes > std::numeric_limits<std::size_t>::max() - page_bytes)
+            return {};
+        const auto padded = (bytes + page_bytes - 1) / page_bytes * page_bytes;
+        // Include a full alignment unit for allocator over-allocation. Do not
+        // consume meaningful graph/workspace headroom just to request THP.
+        if (huge_bytes > available / 8 || padded - bytes > available / 8 - huge_bytes)
+            return {};
+        return {padded, padded - bytes + huge_bytes};
     }
-    void allocate(std::size_t elements) {
+    void reset() {
+        if (aligned_storage) {
+            ::operator delete(aligned_storage, std::align_val_t(alignment));
+            aligned_storage = nullptr;
+        }
+        storage.reset();
+        count = reserved_elements = alignment = 0;
+    }
+    void allocate(std::size_t elements, Plan layout) {
         reset();
+        if (layout.bytes) {
+            auto *p = static_cast<double *>(::operator new(layout.bytes, std::align_val_t(huge_bytes),
+                                                          std::nothrow));
+            if (p) {
+                // Only advise full base pages wholly owned by this allocation.
+                // Object lifetime starts without writing any double values.
+                if (::madvise(p, layout.bytes, MADV_HUGEPAGE) == 0) {
+                    std::uninitialized_default_construct_n(p, layout.bytes / sizeof(double));
+                    aligned_storage = p;
+                    alignment = huge_bytes;
+                    count = elements;
+                    reserved_elements = elements + layout.extra / sizeof(double);
+                    return;
+                }
+                ::operator delete(p, std::align_val_t(huge_bytes));
+            }
+        }
         storage.reset(new double[elements]);
-        count = elements;
+        count = reserved_elements = elements;
     }
 };
 void invoke(const dag::Task &t, const std::vector<double> &a, OutputBuffer &l, int n,
@@ -596,9 +653,11 @@ int main(int argc, char **argv) {
             if (metadata_reserve > case_total || matrix_bytes > case_total - metadata_reserve ||
                 auxiliary > case_total - metadata_reserve - matrix_bytes)
                 throw dag::ResourceLimit("current available memory cannot fit matrix buffers");
-            const auto case_budget = case_total - metadata_reserve - matrix_bytes - auxiliary;
+            auto case_budget = case_total - metadata_reserve - matrix_bytes - auxiliary;
             if (case_budget < 4096)
                 throw dag::ResourceLimit("matrix buffers leave insufficient execution memory");
+            const auto output_plan = l.plan(elements, case_budget);
+            case_budget -= output_plan.extra;
             limits.memory_bytes = case_budget;
             diagnosed_case_budget = case_budget;
             const auto workspace = [&](const dag::Task &task) -> std::size_t {
@@ -620,7 +679,14 @@ int main(int argc, char **argv) {
             resource_stage = "matrix-allocation";
             if (a.empty()) {
                 a.resize(elements);
-                l.allocate(elements);
+                l.allocate(elements, output_plan);
+                // Advice/aligned allocation may fall back to ordinary storage.
+                // The allocation attempt was conservatively reserved; do not
+                // retain that optional charge after its storage is released.
+                const auto actual_extra = (l.capacity() - elements) * sizeof(double);
+                case_budget += output_plan.extra - actual_extra;
+                limits.memory_bytes = case_budget;
+                diagnosed_case_budget = case_budget;
             }
             if (program.nodes.empty() || program.nodes.front().kind != dag::Node::Kind::Copy) {
                 // Preserve the original zero-initialized output semantics unless
