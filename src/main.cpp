@@ -593,29 +593,35 @@ int main(int argc, char **argv) {
                     const auto cap_graph = [&](std::size_t available) {
                         return graph_budget ? std::min(graph_budget, available) : available;
                     };
-                    // Reserve the bound operator's known per-worker scratch before
-                    // expansion, not just after we have allocated all task records.
-                    const bool uses_trsm = std::find(program.operators.begin(),
-                        program.operators.end(), "trsm") != program.operators.end();
-                    const auto planned_scratch = uses_trsm
-                        ? static_cast<std::size_t>(b) * b * sizeof(double) : 0;
-                    if (planned_scratch > (case_budget - pool_reserve) / planned_workers)
-                        throw dag::ResourceLimit("parallel workspace leaves no expansion budget");
-                    preparation_limits.memory_bytes = cap_graph(case_budget - pool_reserve -
-                        planned_scratch * planned_workers);
+                    // Expansion does not invoke kernels. Their scratch is only
+                    // reserved after the actual bound calls are known; a symbol
+                    // in the catalog need not execute for this shape.
+                    preparation_limits.memory_bytes = cap_graph(case_budget - pool_reserve);
                     st.effective_graph_budget_bytes = preparation_limits.memory_bytes;
                     resource_stage = "task-expansion";
                     // This bounded speculative expansion stops as soon as its
                     // representation no longer fits. It never runs numerical work.
                     auto tasks = dag::instantiate(program, {n, b}, preparation_limits);
                     resource_stage = "task-validation";
-                    std::size_t scratch_per_worker = 0;
+                    std::size_t scratch_per_worker = 0, numerical_calls = 0;
+                    long double work_units = 0;
                     for (const auto &task : tasks) {
                         validate_task(task, n, b);
                         scratch_per_worker = std::max(scratch_per_worker, workspace(task));
+                        if (task.symbol != "__copy" && task.symbol != "__zero_upper") {
+                            ++numerical_calls;
+                            const long double cube = static_cast<long double>(b) * b * b;
+                            if (task.symbol == "cholesky") work_units += cube / 3;
+                            else if (task.symbol == "trsm") work_units += cube;
+                            else if (task.symbol == "madd") work_units += 2 * cube;
+                            else work_units += task.args.size();
+                        }
                     }
-                    if (mode == "auto" &&
-                        tasks.size() <= 2 * static_cast<std::size_t>(planned_workers)) {
+                    // Few calls can still be expensive: more available cores
+                    // must not turn a heavy DAG into a serial computation.
+                    if (mode == "auto" && (numerical_calls <= 1 ||
+                        (numerical_calls <= 2 * static_cast<std::size_t>(planned_workers) &&
+                         work_units <= 1048576.0L))) {
                         resource_stage = "serial-small-execution";
                         st.execution_mode = "serial-small-workload";
                         st.prepare = elapsed(prep_start);
