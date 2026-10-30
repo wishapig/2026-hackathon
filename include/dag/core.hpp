@@ -99,6 +99,8 @@ class Executor {
                        const std::function<void()> &before = {});
     void set_memory_budget(std::size_t bytes);
     std::size_t reserved_bytes() const;
+    void zero_ranges(double *first, std::size_t first_count,
+                     double *second, std::size_t second_count);
 
   private:
     struct Impl;

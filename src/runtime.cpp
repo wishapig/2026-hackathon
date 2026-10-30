@@ -162,6 +162,11 @@ struct Executor::Impl {
     std::size_t epoch = 0;
     unsigned active = 0, started = 0;
     bool stopping = false;
+    struct ZeroRange {
+        double *data = nullptr;
+        std::size_t count = 0;
+    } zero_range[2];
+    bool zero_job = false;
 
     explicit Impl(RuntimeOptions o) : options(std::move(o)), cpus(allowed_node_cpus()) {
         if (options.backend != "atomic" && options.backend != "owner")
@@ -459,7 +464,17 @@ struct Executor::Impl {
             observed = epoch;
             lock.unlock();
             try {
-                work(id);
+                if (zero_job) {
+                    for (const auto &range : zero_range) {
+                        const auto width = range.count / workers, extra = range.count % workers;
+                        const auto begin = width * id + std::min<std::size_t>(id, extra);
+                        const auto count = width + (id < extra);
+                        if (count)
+                            std::fill_n(range.data + begin, count, 0.0);
+                    }
+                } else {
+                    work(id);
+                }
             } catch (...) {
                 fail(std::current_exception());
             }
@@ -467,6 +482,34 @@ struct Executor::Impl {
             if (--active == 0)
                 done_cv.notify_all();
         }
+    }
+    void zero_ranges(double *first, std::size_t first_count,
+                     double *second, std::size_t second_count) {
+        std::lock_guard<std::mutex> serialized(run_mutex);
+        const auto page = static_cast<std::size_t>(std::max<long>(1, sysconf(_SC_PAGESIZE)));
+        // Avoid a pool wake for less than one page per worker. No allocation
+        // or numerical task is needed, and both ranges share one rendezvous.
+        if (first_count + second_count < workers * (page / sizeof(double))) {
+            if (first_count) std::fill_n(first, first_count, 0.0);
+            if (second_count) std::fill_n(second, second_count, 0.0);
+            return;
+        }
+        zero_range[0] = {first, first_count};
+        zero_range[1] = {second, second_count};
+        error = nullptr;
+        failed.store(false, std::memory_order_relaxed);
+        {
+            std::unique_lock<std::mutex> lock(control);
+            zero_job = true;
+            active = workers;
+            ++epoch;
+            start_cv.notify_all();
+            done_cv.wait(lock, [&] { return active == 0; });
+            zero_job = false;
+        }
+        zero_range[0] = zero_range[1] = {};
+        if (error)
+            std::rethrow_exception(error);
     }
     std::size_t base_reservation() const {
         return checked_mul(workers, worker_stack_bytes + 2 * sizeof(Queue) + 4096);
@@ -625,5 +668,9 @@ void Executor::set_memory_budget(std::size_t bytes) {
 }
 std::size_t Executor::reserved_bytes() const {
     return impl_->reservation();
+}
+void Executor::zero_ranges(double *first, std::size_t first_count,
+                           double *second, std::size_t second_count) {
+    impl_->zero_ranges(first, first_count, second, second_count);
 }
 } // namespace dag

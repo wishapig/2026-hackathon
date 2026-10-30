@@ -19,6 +19,7 @@
 #include <string>
 #include <sys/resource.h>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 #ifndef DAG_KERNEL_MODE
@@ -26,6 +27,16 @@
 #endif
 
 namespace {
+// Default construction starts scalar lifetimes without touching storage; every
+// new logical element is explicitly zeroed below before input I/O or execution.
+template <class T> struct DeferredZeroAllocator : std::allocator<T> {
+    template <class U> struct rebind { using other = DeferredZeroAllocator<U>; };
+    template <class U> void construct(U *p) { ::new (static_cast<void *>(p)) U; }
+    template <class U, class... Args> void construct(U *p, Args &&...args) {
+        ::new (static_cast<void *>(p)) U(std::forward<Args>(args)...);
+    }
+};
+using Matrix = std::vector<double, DeferredZeroAllocator<double>>;
 using Clock = std::chrono::steady_clock;
 double elapsed(Clock::time_point t) {
     return std::chrono::duration<double>(Clock::now() - t).count();
@@ -320,7 +331,7 @@ void validate_task(const dag::Task &t, std::uint32_t n, std::uint32_t b, bool au
         require_region(t.writes, "L", c, b, b, n);
     }
 }
-void invoke(const dag::Task &t, const std::vector<double> &a, std::vector<double> &l, int n,
+void invoke(const dag::Task &t, const Matrix &a, Matrix &l, int n,
             int b) {
     if (t.symbol == "scalar_expression") {
         scalar_expression(t, static_cast<std::size_t>(n), a.data(), l.data());
@@ -515,7 +526,7 @@ int main(int argc, char **argv) {
         if (count > memory / sizeof(CaseStats) / 8)
             throw std::runtime_error("case statistics exceed budget");
         stats.reserve(count);
-        std::vector<double> a, l;
+        Matrix a, l;
         for (std::uint32_t index = 0; index < count; ++index) {
             active_case = index;
             active_n = active_b = 0;
@@ -542,8 +553,8 @@ int main(int argc, char **argv) {
             // Reuse touched capacity across shape changes. Growth beyond either
             // buffer releases the old pair before allocating a replacement.
             if (elements > a.capacity() || elements > l.capacity()) {
-                std::vector<double>().swap(a);
-                std::vector<double>().swap(l);
+                Matrix().swap(a);
+                Matrix().swap(l);
             }
             if (consumed_bytes > file_bytes ||
                 elements > (file_bytes - consumed_bytes) / sizeof(double))
@@ -589,8 +600,8 @@ int main(int argc, char **argv) {
                     throw;
                 // The payload has not been read yet, so discard the optional
                 // cache before deciding that the next case cannot fit.
-                std::vector<double>().swap(a);
-                std::vector<double>().swap(l);
+                Matrix().swap(a);
+                Matrix().swap(l);
                 refresh_case_budget();
             }
             const auto workspace = [&](const dag::Task &task) -> std::size_t {
@@ -612,19 +623,28 @@ int main(int argc, char **argv) {
             if (stream && spare_matrix_capacity()) {
                 // Streaming cannot retry preparation after its first store.
                 // Give it the exact-sized buffers used before capacity reuse.
-                std::vector<double>().swap(a);
-                std::vector<double>().swap(l);
+                Matrix().swap(a);
+                Matrix().swap(l);
                 refresh_case_budget();
             }
             resource_stage = "matrix-allocation";
-            const bool reused_output = !l.empty();
+            const auto old_a_size = std::min(a.size(), elements);
+            const auto old_l_size = std::min(l.size(), elements);
             a.resize(elements);
             l.resize(elements);
-            if (reused_output &&
-                (program.nodes.empty() || program.nodes.front().kind != dag::Node::Kind::Copy)) {
-                // Preserve the original zero-initialized output semantics unless
-                // the first semantic action provably overwrites the full buffer.
-                std::fill(l.begin(), l.end(), 0.0);
+            const auto zero_l_from = program.nodes.empty() ||
+                program.nodes.front().kind != dag::Node::Kind::Copy ? 0 : old_l_size;
+            const auto new_a = elements - old_a_size, zero_l = elements - zero_l_from;
+            if (new_a || zero_l) {
+                // A must be touched before the excluded file read. L retains
+                // exactly the old value-initialization and no-Copy semantics.
+                if (executor) {
+                    executor->zero_ranges(a.data() + old_a_size, new_a,
+                                          l.data() + zero_l_from, zero_l);
+                } else {
+                    std::fill_n(a.data() + old_a_size, new_a, 0.0);
+                    std::fill_n(l.data() + zero_l_from, zero_l, 0.0);
+                }
             }
             read(input, a.data(), elements * sizeof(double), io_seconds);
             if (!std::all_of(a.begin(), a.end(), [](double x) { return std::isfinite(x); }))
@@ -655,10 +675,11 @@ int main(int argc, char **argv) {
                         // L is still untouched by the algorithm. Release it
                         // before copying input into exact logical storage:
                         // old A + new A fits within old A + old L capacity.
-                        std::vector<double>().swap(l);
+                        Matrix().swap(l);
                         if (a.capacity() > elements)
-                            std::vector<double>(a.begin(), a.end()).swap(a);
+                            Matrix(a.begin(), a.end()).swap(a);
                         l.resize(elements);
+                        std::fill(l.begin(), l.end(), 0.0);
                         refresh_case_budget();
                         st.case_memory_budget_bytes = case_budget;
                         return true;
@@ -840,8 +861,8 @@ int main(int argc, char **argv) {
         }
         resource_stage = "finalize";
         active_case.reset();
-        std::vector<double>().swap(a);
-        std::vector<double>().swap(l);
+        Matrix().swap(a);
+        Matrix().swap(l);
         executor.reset();
         {
             IOTime time{io_seconds};
