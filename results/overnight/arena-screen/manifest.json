@@ -1,0 +1,41 @@
+{
+  "candidate_commit": "12cc1c2fee782ff68604fa30f2f2c519a795474a",
+  "baseline_commit": "3429b75d70adb417588f0ecd6c583f32ba6abaa6",
+  "metadata_bytes": 141,
+  "seconds": {
+    "baseline": [
+      0.298393194,
+      0.275010063,
+      0.290202799,
+      0.290602632
+    ],
+    "arena": [
+      0.288233606,
+      0.293908247,
+      0.283401437,
+      0.302206274
+    ]
+  },
+  "prepare_seconds": {
+    "baseline": [
+      0.021308527,
+      0.018859191,
+      0.020919092,
+      0.021787848999999998
+    ],
+    "arena": [
+      0.022263830000000002,
+      0.021666137,
+      0.018210365,
+      0.01940957
+    ]
+  },
+  "median_seconds": {
+    "baseline": 0.2904027155,
+    "arena": 0.2910709265
+  },
+  "decision": "Do not integrate: four-pair screen shows no stable complete-time or preparation benefit; no Pareto designation.",
+  "coverage": "20/20 validated all samples; no resource exclusions. Separate full acceptance and R27 PASS.",
+  "mechanism": "Task array allocation count reduced from58903 to192 at19602 tasks, but no measured score improvement. Task descriptor104B->128B.",
+  "scope": "local x86-64 demo only; no judge-library or target validation"
+}
