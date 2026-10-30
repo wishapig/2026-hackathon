@@ -88,19 +88,199 @@ template <class T> void grow(std::vector<T> &v, std::size_t needed, Budget &b) {
     v.reserve(cap);
     // Keep old allocation charge conservatively: graph construction has a hard envelope.
 }
+
+struct WorkBudget {
+    std::size_t steps = 0, limit;
+    void tick() {
+        if (steps == std::numeric_limits<std::size_t>::max() || (limit && steps >= limit))
+            throw std::runtime_error("dependency construction work budget exceeded");
+        ++steps;
+    }
+};
+
+// A uniform, origin-aligned rectangular partition has an exact integer identity
+// for each nonempty region. On one buffer, equal IDs mean identical regions;
+// unequal IDs mean disjoint regions. This proof depends only on access geometry,
+// never on task symbols, matrix parameters, or a particular algorithm's loops.
+// A different layout on any buffer falls back to the general interval analysis.
+bool grid_graph(std::vector<Task> &tasks, Budget budget, WorkBudget &work, Graph &graph) {
+    constexpr auto none = std::numeric_limits<std::uint32_t>::max();
+    struct Grid {
+        const std::string *buffer;
+        std::size_t rows, cols, stride, columns, first, last, base = 0;
+    };
+    struct State {
+        std::uint32_t writer = none, readers = none;
+    };
+    struct Reader {
+        std::uint32_t task, next;
+    };
+    std::vector<Grid> grids;
+    std::size_t accesses = 0;
+    const auto find_grid = [&](const std::string &buffer) -> Grid * {
+        for (auto &grid : grids)
+            if (*grid.buffer == buffer)
+                return &grid;
+        return nullptr;
+    };
+    const auto cell = [](const Region &r, const Grid &g) {
+        return add(mul((r.offset / g.stride) / g.rows, g.columns),
+                   (r.offset % g.stride) / g.cols);
+    };
+    for (const auto &task : tasks)
+        for (const auto *rs : {&task.reads, &task.writes})
+            for (const auto &r : *rs) {
+                work.tick();
+                if (!r.rows || !r.cols)
+                    continue;
+                if (!r.stride || r.cols > r.stride || r.stride % r.cols ||
+                    (r.offset / r.stride) % r.rows || (r.offset % r.stride) % r.cols)
+                    return false;
+                accesses = add(accesses, 1);
+                auto *g = find_grid(r.buffer);
+                if (!g) {
+                    grow(grids, grids.size() + 1, budget);
+                    grids.push_back({&r.buffer, r.rows, r.cols, r.stride, r.stride / r.cols, 0, 0});
+                    g = &grids.back();
+                    g->first = g->last = cell(r, *g);
+                } else {
+                    if (g->rows != r.rows || g->cols != r.cols || g->stride != r.stride)
+                        return false;
+                    const auto id = cell(r, *g);
+                    g->first = std::min(g->first, id);
+                    g->last = std::max(g->last, id);
+                }
+            }
+    if (grids.empty())
+        return false;
+
+    std::size_t count = 0;
+    for (auto &g : grids) {
+        const auto cells = add(g.last - g.first, 1);
+        // Sparse far-apart coordinates should not reserve a huge dense array.
+        // Declining this representation does not reject the input or change its
+        // semantics; the existing general builder handles it instead.
+        const auto capacity = (budget.limit - budget.used) / sizeof(State);
+        if (count > capacity || cells > capacity - count)
+            return false;
+        g.base = count;
+        count += cells;
+    }
+    if (count / 4 > accesses)
+        return false;
+    budget.take(mul(count, sizeof(State)));
+    std::vector<State> states(count);
+    std::vector<Reader> readers;
+    std::uint32_t free_reader = none;
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> edges;
+    std::vector<std::uint32_t> deps;
+    for (std::uint32_t id = 0; id < tasks.size(); ++id) {
+        deps.clear();
+        const auto dependency = [&](std::uint32_t src) {
+            if (src != none && src != id) {
+                grow(deps, deps.size() + 1, budget);
+                deps.push_back(src);
+            }
+        };
+        const auto access = [&](const Region &r, bool write) {
+            if (!r.rows || !r.cols)
+                return;
+            work.tick();
+            const auto &g = *find_grid(r.buffer);
+            auto &state = states[g.base + cell(r, g) - g.first];
+            dependency(state.writer);
+            if (write) {
+                auto current = state.readers;
+                while (current != none) {
+                    auto &reader = readers[current];
+                    dependency(reader.task);
+                    const auto next = reader.next;
+                    reader.next = free_reader;
+                    free_reader = current;
+                    current = next;
+                }
+                state.readers = none;
+                state.writer = id;
+            } else if (state.readers == none || readers[state.readers].task != id) {
+                std::uint32_t current;
+                if (free_reader != none) {
+                    current = free_reader;
+                    free_reader = readers[current].next;
+                } else {
+                    if (readers.size() >= none)
+                        throw std::runtime_error("grid reader ID capacity exceeded");
+                    current = static_cast<std::uint32_t>(readers.size());
+                    grow(readers, readers.size() + 1, budget);
+                    readers.push_back({0, none});
+                }
+                readers[current] = {id, state.readers};
+                state.readers = current;
+            }
+        };
+        for (const auto &r : tasks[id].reads)
+            access(r, false);
+        for (const auto &r : tasks[id].writes)
+            access(r, true);
+        std::sort(deps.begin(), deps.end());
+        deps.erase(std::unique(deps.begin(), deps.end()), deps.end());
+        grow(edges, add(edges.size(), deps.size()), budget);
+        for (auto src : deps)
+            edges.emplace_back(src, id);
+    }
+
+    const auto n = tasks.size();
+    budget.take(mul(n + 1, sizeof(std::size_t)));
+    budget.take(mul(n, sizeof(std::uint32_t)));
+    budget.take(mul(edges.size(), sizeof(std::uint32_t)));
+    graph.offsets.assign(n + 1, 0);
+    graph.indegrees.assign(n, 0);
+    graph.successors.resize(edges.size());
+    for (auto [src, dst] : edges) {
+        ++graph.offsets[src + 1];
+        ++graph.indegrees[dst];
+    }
+    for (std::size_t i = 1; i < graph.offsets.size(); ++i)
+        graph.offsets[i] += graph.offsets[i - 1];
+    // Edges were emitted in increasing destination order and deduplicated per
+    // destination. Scatter by source therefore gives sorted, unique successors
+    // in linear time. Temporarily reuse offsets as cursors, then restore starts.
+    for (auto [src, dst] : edges)
+        graph.successors[graph.offsets[src]++] = dst;
+    for (std::size_t i = n; i > 0; --i)
+        graph.offsets[i] = graph.offsets[i - 1];
+    graph.offsets[0] = 0;
+    graph.memory_bytes = add(task_bytes(tasks),
+                             add(mul(graph.offsets.capacity(), sizeof(std::size_t)),
+                                 add(mul(graph.indegrees.capacity(), sizeof(std::uint32_t)),
+                                     mul(graph.successors.capacity(), sizeof(std::uint32_t)))));
+    graph.tasks = std::move(tasks);
+    return true;
+}
 } // namespace
 
 Graph build_graph(std::vector<Task> tasks, const Limits &limits) {
     if (limits.max_tasks && tasks.size() > limits.max_tasks)
         throw std::runtime_error("task count budget exceeded");
     if (tasks.size() >= std::numeric_limits<std::uint32_t>::max())
-        throw ResourceLimit("task count exceeds graph capacity");
+        throw std::runtime_error("task count exceeds graph ID capacity");
     Budget budget{0, limits.memory_bytes};
     budget.take(task_bytes(tasks));
     for (const auto &t : tasks)
         for (const auto *rr : {&t.reads, &t.writes})
             for (const auto &r : *rr)
                 check_region(r);
+    WorkBudget work{0, limits.max_steps};
+    Graph grid;
+    try {
+        if (grid_graph(tasks, budget, work, grid))
+            return grid;
+    } catch (const ResourceLimit &) {
+        // A fast representation is optional: its storage failure must not rule
+        // out the existing general representation. No task has executed or moved.
+        grid = Graph{};
+    } catch (const std::bad_alloc &) {
+        grid = Graph{};
+    }
     // Partition physical cells by their complete declared-access membership.
     // Disjoint intervals with the same membership can share dependency state:
     // no task in this execution can access one without accessing the others.
@@ -119,13 +299,7 @@ Graph build_graph(std::vector<Task> tasks, const Limits &limits) {
         bool start;
     };
     std::vector<Event> events;
-    std::size_t steps = 0;
-    auto tick = [&] {
-        if (steps == std::numeric_limits<std::size_t>::max() ||
-            (limits.max_steps && steps >= limits.max_steps))
-            throw std::runtime_error("dependency construction work budget exceeded");
-        ++steps;
-    };
+    auto tick = [&] { work.tick(); };
     for (const auto &t : tasks)
         for (const auto *accesses : {&t.reads, &t.writes})
             for (const auto &r : *accesses) {
