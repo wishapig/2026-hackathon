@@ -1,0 +1,9 @@
+[ 10%] Built target metadata
+[ 40%] Built target contest_kernels
+[ 80%] Built target dag_runtime
+[100%] Built target dag_run
+[ 50%] Building CXX object CMakeFiles/spd_generator.dir/vendor/public20/tools/local_generator/spd_generator.cpp.o
+[100%] Linking CXX executable spd_generator
+[100%] Built target spd_generator
+[100%] Built target public_verifier
+[100%] Built target dag_check
