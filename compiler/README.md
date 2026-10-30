@@ -100,7 +100,36 @@ requires a declared catalog and an explicit application ABI adapter.
 
 ## Artifact contract
 
-All container versions begin with an 8-byte magic, little-endian uint64 decoded
+### Default execution-only encoding (R-28)
+
+Default --encoding auto selects the smaller of lean and lean-deflate. No SHA-256,
+FNV, source filenames or original local variable names are stored in these formats.
+
+- One byte: 0xA7 (raw binary) or 0xA8 (raw DEFLATE, no zlib wrapper/checksum).
+- Unsigned LEB128 decoded payload length for buffer allocation.
+- Binary payload: [integer_semantics, operators, buffers, guards, program].
+- Literal integers are encoded directly; [0, slot] denotes a lexical variable.
+  Slots 0 and 1 bind runtime n and b. Opcode1..15 denotes negation, logical-not,
+  +, -, *, /, %, <, <=, >, >=, ==, !=, &&, || respectively.
+- let/for declarations use lexical IDs. Operator and buffer identities occur once
+  in their respective tables; calls/regions use table IDs. These identities bind
+  external implementations and buffers; they are not hidden DAG formulas.
+- Only guards already implied by mandatory runtime n/b validation are omitted.
+  Loops, branches, short-circuit semantics, parameters and read/write regions stay.
+
+Default compilation does not calculate source/catalog fingerprints. Explicit
+--json-debug may put them in an optional offline report, never in the lean file.
+Parsing and allocation constraints remain for execution/resource correctness.
+Repeated graph/contract audits are default-off; explicit DAG_AUDIT=1 enables the
+existing developer audit. Required numerical validation remains unchanged.
+
+### Legacy comparison formats
+
+The following historical formats remain readable and explicitly selectable.
+Their hashes/checksums exist only for legacy compatibility, not default output.
+
+
+Legacy DAGMETA1–6 containers begin with an 8-byte magic, little-endian uint64 decoded
 payload byte length, and little-endian uint64 FNV-1a checksum of the decoded payload:
 
 - `DAGMETA1`: the remaining bytes are deterministic compact UTF-8 JSON.
@@ -113,11 +142,8 @@ payload byte length, and little-endian uint64 FNV-1a checksum of the decoded pay
   the integer/string/array binary grammar below.
 - `DAGMETA6`: exactly one zlib stream containing the `DAGMETA5` payload.
 
-The compiler defaults to `--encoding auto`, which picks the smallest of the six
-containers. `--encoding raw`, `--encoding zlib`, `--encoding compact` and
-`--encoding compact-zlib`, `--encoding binary` and `--encoding binary-zlib` select explicit comparison
-variants. CMake exposes the same choice as `DAG_METADATA_ENCODING`. The runtime
-accepts all six versions and requires zlib >= 1.2.9 (Ubuntu package `zlib1g-dev` for
+Explicit --encoding raw/zlib/compact/compact-zlib/binary/binary-zlib selects a legacy container. CMake DAG_METADATA_ENCODING additionally accepts auto/lean/lean-deflate; auto selects only the two new execution-only representations. The runtime
+accepts all six legacy versions plus lean/lean-deflate and requires zlib >= 1.2.9 (Ubuntu package `zlib1g-dev` for
 building). Decompression checks the declared output size and memory budget before
 allocation, and rejects truncated data, trailing bytes/streams and mismatched
 lengths. Loading and decompression stay inside the scored computation interval.
