@@ -21,7 +21,7 @@
 
 ## 配置与评测
 
-`DAG_SCHEDULE=pattern` 选择循环窗口；`DAG_SCHEDULE=graph` 保留原始全图对照；`auto` 按当前实现选择可用路径。`tools/benchmark.py --schedule` 显式记录所选路径。
+`DAG_SCHEDULE=pattern` 选择循环窗口；`DAG_SCHEDULE=graph` 保留原始全图对照；`auto` 对 `q=n/b >= 64` 的分块循环选择窗口，对较小 q 保留紧凑 CSR 图，以免暂停点成本超过建图成本。`tools/benchmark.py --schedule` 显式记录所选路径。
 
 统计中 `pattern_windows` 是交付执行的窗口数，`peak_window_tasks` 是最大窗口节点数；pattern 路径的 `graph_bytes` 记录活动窗口的任务容器容量估算，不是全图存量或进程峰值 RSS。`tasks` 仍是压缩展开后的逻辑调用次数。`prepare_seconds` 包含循环绑定、证明、窗口生成与调用前准备，`execute_seconds` 包含窗口执行和等待；选择依据始终是完整 `score_seconds`。
 
