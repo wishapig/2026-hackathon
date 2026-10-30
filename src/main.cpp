@@ -717,7 +717,7 @@ int main(int argc, char **argv) {
                         preparation_limits.memory_bytes =
                             cap_graph(parallel_budget - retained_runtime_bytes);
                         st.effective_graph_budget_bytes = preparation_limits.memory_bytes;
-                    diagnosed_effective_graph = preparation_limits.memory_bytes;
+                        diagnosed_effective_graph = preparation_limits.memory_bytes;
                         resource_stage = "graph-construction";
                         auto graph = dag::build_graph(std::move(tasks), preparation_limits);
                         if (options.audit)
