@@ -320,31 +320,7 @@ void validate_task(const dag::Task &t, std::uint32_t n, std::uint32_t b, bool au
         require_region(t.writes, "L", c, b, b, n);
     }
 }
-// Output is either fully overwritten by the source's first Copy or explicitly
-// zeroed before execution. Default-initialize the allocation so the first case
-// does not pay an unnecessary zero pass before that timed Copy. Input remains a
-// value-initialized vector: its first-touch costs cannot hide inside file I/O.
-class OutputBuffer {
-    std::unique_ptr<double[]> storage;
-    std::size_t count = 0;
-
-  public:
-    double *data() { return storage.get(); }
-    double *begin() { return data(); }
-    double *end() { return count ? data() + count : data(); }
-    std::size_t size() const { return count; }
-    std::size_t capacity() const { return count; }
-    void reset() {
-        storage.reset();
-        count = 0;
-    }
-    void allocate(std::size_t elements) {
-        reset();
-        storage.reset(new double[elements]);
-        count = elements;
-    }
-};
-void invoke(const dag::Task &t, const std::vector<double> &a, OutputBuffer &l, int n,
+void invoke(const dag::Task &t, const std::vector<double> &a, std::vector<double> &l, int n,
             int b) {
     if (t.symbol == "scalar_expression") {
         scalar_expression(t, static_cast<std::size_t>(n), a.data(), l.data());
@@ -539,8 +515,7 @@ int main(int argc, char **argv) {
         if (count > memory / sizeof(CaseStats) / 8)
             throw std::runtime_error("case statistics exceed budget");
         stats.reserve(count);
-        std::vector<double> a;
-        OutputBuffer l;
+        std::vector<double> a, l;
         for (std::uint32_t index = 0; index < count; ++index) {
             active_case = index;
             active_n = active_b = 0;
@@ -568,7 +543,7 @@ int main(int argc, char **argv) {
             // allocation when the next case shrinks or grows.
             if (a.size() != elements) {
                 std::vector<double>().swap(a);
-                l.reset();
+                std::vector<double>().swap(l);
             }
             if (consumed_bytes > file_bytes ||
                 elements > (file_bytes - consumed_bytes) / sizeof(double))
@@ -620,9 +595,8 @@ int main(int argc, char **argv) {
             resource_stage = "matrix-allocation";
             if (a.empty()) {
                 a.resize(elements);
-                l.allocate(elements);
-            }
-            if (program.nodes.empty() || program.nodes.front().kind != dag::Node::Kind::Copy) {
+                l.resize(elements);
+            } else if (program.nodes.empty() || program.nodes.front().kind != dag::Node::Kind::Copy) {
                 // Preserve the original zero-initialized output semantics unless
                 // the first semantic action provably overwrites the full buffer.
                 std::fill(l.begin(), l.end(), 0.0);
@@ -820,7 +794,7 @@ int main(int argc, char **argv) {
         resource_stage = "finalize";
         active_case.reset();
         std::vector<double>().swap(a);
-        l.reset();
+        std::vector<double>().swap(l);
         executor.reset();
         {
             IOTime time{io_seconds};
