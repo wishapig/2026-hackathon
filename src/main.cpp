@@ -305,6 +305,20 @@ void validate_task(const dag::Task &t, std::uint32_t n, std::uint32_t b, bool au
                 require_region(t.writes, "L", row * n + row + 1, 1, n - row - 1, n);
         return;
     }
+    if (t.symbol == "combine") {
+        if (t.args.size() != 4 || t.args[3] != static_cast<dag::Int>(n))
+            throw std::runtime_error("combine argument count/stride mismatch");
+        const auto elements = static_cast<std::uint64_t>(n) * n;
+        for (std::size_t i = 0; i < 3; ++i)
+            if (t.args[i] < 0 || static_cast<std::uint64_t>(t.args[i]) >= elements)
+                throw std::runtime_error("combine scalar offset outside matrix");
+        if (audit) {
+            require_region(t.reads, "L", static_cast<std::size_t>(t.args[0]), 1, 1, n);
+            require_region(t.reads, "L", static_cast<std::size_t>(t.args[1]), 1, 1, n);
+            require_region(t.writes, "L", static_cast<std::size_t>(t.args[2]), 1, 1, n);
+        }
+        return;
+    }
     std::size_t argc =
         t.symbol == "cholesky" ? 4 : (t.symbol == "trsm" || t.symbol == "madd" ? 5 : 0);
     if (!argc || t.args.size() != argc)
@@ -367,6 +381,10 @@ void invoke_once(const dag::Task &t, const Matrix &a, Matrix &l, int n,
         return;
     }
     double *p = l.data();
+    if (t.symbol == "combine") {
+        combine(p + t.args[0], p + t.args[1], p + t.args[2], n);
+        return;
+    }
     if (t.symbol == "cholesky")
         cholesky(p + t.args[0], p + t.args[1], b, n);
     else if (t.symbol == "trsm")
@@ -561,7 +579,8 @@ int main(int argc, char **argv) {
         for (const auto &op : program.operators)
             if (op != "__copy" && op != "__zero_upper" &&
                 (scalar_application ? op != "scalar_expression"
-                                    : (op != "cholesky" && op != "trsm" && op != "madd")))
+                                    : (op != "cholesky" && op != "trsm" && op != "madd" &&
+                                       op != "combine")))
                 throw std::runtime_error("operator is not bound by this application: " + op);
         if (program.retained_bytes > memory || memory - program.retained_bytes < 1024 * 1024)
             throw dag::ResourceLimit("metadata exceeds application memory budget");

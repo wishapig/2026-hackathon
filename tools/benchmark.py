@@ -727,7 +727,8 @@ def functional_algorithms(build, result_dir, env, timeout):
             for name, source, kind in [
                     ('naive_cholesky', 'naive_cholesky.cpp', 'cholesky'),
                     ('right_looking_cholesky', 'right_looking_cholesky.cpp', 'cholesky'),
-                    ('scalar_wavefront', 'scalar_wavefront.cpp', 'wavefront')]:
+                    ('scalar_wavefront', 'scalar_wavefront.cpp', 'wavefront'),
+                    ('wavefront_combine', 'wavefront.cpp', 'external_wavefront')]:
                 entry = {'name': name, 'kind': 'functional_only', 'performance_eligible': False,
                          'source': str(root / 'examples' / source),
                          'source_sha256': digest(root / 'examples' / source),
@@ -749,8 +750,18 @@ def functional_algorithms(build, result_dir, env, timeout):
                     return run
                 try:
                     metadata = temp / (name + '.meta')
-                    run_stage('compile', [sys.executable, root/'compiler/compile.py',
-                              root/'examples'/source, '--entry', name, '-o', metadata], clean)
+                    compile_command = [sys.executable, root/'compiler/compile.py',
+                                       root/'examples'/source, '--entry', name, '-o', metadata]
+                    if kind == 'external_wavefront':
+                        # Infer combine's contract directly from the demo kernel
+                        # source.  Do not write or modify a catalog file.
+                        compile_command[compile_command.index('--entry') + 1] = 'wavefront'
+                        compile_command += ['--operator-source', root/'vendor/demo/src/base_kernels/kernels_public.cpp',
+                                            '--operator', 'combine', '--include', root/'vendor/demo/include']
+                        entry['operator_source'] = str(root/'vendor/demo/src/base_kernels/kernels_public.cpp')
+                        entry['operator_source_sha256'] = digest(root/'vendor/demo/src/base_kernels/kernels_public.cpp')
+                        entry['operator_analysis'] = 'clang AST contract inference; no catalog file'
+                    run_stage('compile', compile_command, clean)
                     entry.update(metadata_bytes=metadata.stat().st_size, metadata_sha256=digest(metadata))
                     inp = temp / (name + '.bin')
                     expected = []
@@ -770,7 +781,10 @@ def functional_algorithms(build, result_dir, env, timeout):
                                 for col in range(1, n):
                                     for row in range(1, n):
                                         at = row*n+col
-                                        ref[at] = Fraction(a[at]) + ref[at-n]/4 + ref[at-1]/2
+                                        if kind == 'external_wavefront':
+                                            ref[at] = Fraction(ref[at-n]) + ref[at-1]
+                                        else:
+                                            ref[at] = Fraction(a[at]) + ref[at-n]/4 + ref[at-1]/2
                                 values = [float(x) for x in ref]
                             f.write(struct.pack('=II', n, b))
                             f.write(struct.pack('=' + str(n*n) + 'd', *a))
@@ -779,6 +793,8 @@ def functional_algorithms(build, result_dir, env, timeout):
                     for mode in ('serial', 'parallel'):
                         out, stats = temp/(name+'-'+mode+'.out'), temp/(name+'-'+mode+'.json')
                         child = clean.copy()
+                        if kind == 'external_wavefront':
+                            child['DAG_APPLICATION'] = 'blocked'
                         child.update(DAG_METADATA=str(metadata), DAG_STATS_FILE=str(stats), DAG_MODE=mode)
                         run_stage(mode, [build/'dag_run', inp, out], child)
                         runtime = json.loads(stats.read_text())
@@ -809,7 +825,7 @@ def functional_algorithms(build, result_dir, env, timeout):
                 except (OSError, ValueError, RuntimeError, KeyError, subprocess.TimeoutExpired) as error:
                     entry['error'] = str(error)
                 save()
-        report['passed'] = len(report['algorithms']) == 3 and all(x['passed'] for x in report['algorithms'])
+        report['passed'] = len(report['algorithms']) == 4 and all(x['passed'] for x in report['algorithms'])
     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
         report['error'] = str(error)
     save()

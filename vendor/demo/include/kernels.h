@@ -8,6 +8,8 @@ extern "C" {
 void cholesky(double *A, double *L, int b, int lda);
 void trsm(double *A, double *L, double *X, int b, int lda);
 void madd(double *A, double *B, double *C, int b, int lda);
+// Demo-only supplemental operator used by the source-analysis benchmark.
+void combine(double *A, double *B, double *C, int lda);
 
 #ifdef __cplusplus
 }

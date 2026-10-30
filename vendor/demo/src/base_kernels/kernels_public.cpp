@@ -12,3 +12,10 @@ extern "C" void trsm(double *A, double *L, double *X, int b, int lda) {
 extern "C" void madd(double *A, double *B, double *C, int b, int lda) {
     __official_madd_impl(A, B, C, b, lda);
 }
+
+// Demo-only operator for source-driven contract inference.  It is not part of
+// the official blocked judge ABI.
+extern "C" void combine(double *A, double *B, double *C, int lda) {
+    (void)lda;
+    *C = *A + *B;
+}
