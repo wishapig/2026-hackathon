@@ -239,24 +239,7 @@ void scalar_expression(const dag::Task &t, std::size_t n, const double *a = null
     if (execute)
         l[dest] = stack.back();
 }
-// Call symbols have already passed the exact program-level ABI allowlist, and
-// decoders admit calls only from that table. Copy/zero are fixed semantic nodes.
-// Their distinct leading bytes identify the bound application operation without
-// repeating full string comparisons for each generated task. This is ABI
-// dispatch, never a graph rule or algorithm/case identity.
-enum class OperatorKind { Cholesky, Trsm, Madd, Scalar, Copy, ZeroUpper, Unknown };
-OperatorKind operator_kind(const dag::Task &task) {
-    switch (task.symbol[0]) {
-    case 'c': return OperatorKind::Cholesky;
-    case 't': return OperatorKind::Trsm;
-    case 'm': return OperatorKind::Madd;
-    case 's': return OperatorKind::Scalar;
-    case '_': return task.symbol[2] == 'c' ? OperatorKind::Copy : OperatorKind::ZeroUpper;
-    default: return OperatorKind::Unknown;
-    }
-}
-void validate_task(const dag::Task &t, OperatorKind kind, std::uint32_t n, std::uint32_t b,
-                   bool audit) {
+void validate_task(const dag::Task &t, std::uint32_t n, std::uint32_t b, bool audit) {
     const auto nn = static_cast<std::size_t>(n) * n;
     if (audit) {
         for (const auto *regions : {&t.reads, &t.writes})
@@ -268,11 +251,11 @@ void validate_task(const dag::Task &t, OperatorKind kind, std::uint32_t n, std::
                     throw std::runtime_error("metadata region out of matrix bounds");
             }
     }
-    if (kind == OperatorKind::Scalar) {
+    if (t.symbol == "scalar_expression") {
         if (audit) scalar_expression(t, n);
         return;
     }
-    if (kind == OperatorKind::Copy) {
+    if (t.symbol == "__copy") {
         if (!t.args.empty())
             throw std::runtime_error("copy takes no arguments");
         if (audit) {
@@ -281,7 +264,7 @@ void validate_task(const dag::Task &t, OperatorKind kind, std::uint32_t n, std::
         }
         return;
     }
-    if (kind == OperatorKind::ZeroUpper) {
+    if (t.symbol == "__zero_upper") {
         if (!t.args.empty())
             throw std::runtime_error("zero_upper takes no arguments");
         // The decoder emits one region per row in order. Verify that common
@@ -298,8 +281,7 @@ void validate_task(const dag::Task &t, OperatorKind kind, std::uint32_t n, std::
         return;
     }
     std::size_t argc =
-        kind == OperatorKind::Cholesky ? 4 :
-        (kind == OperatorKind::Trsm || kind == OperatorKind::Madd ? 5 : 0);
+        t.symbol == "cholesky" ? 4 : (t.symbol == "trsm" || t.symbol == "madd" ? 5 : 0);
     if (!argc || t.args.size() != argc)
         throw std::runtime_error("unknown operator or invalid argument count: " + t.symbol);
     if (t.args[argc - 2] != b || t.args[argc - 1] != n)
@@ -317,14 +299,14 @@ void validate_task(const dag::Task &t, OperatorKind kind, std::uint32_t n, std::
     };
     const auto a = static_cast<std::size_t>(t.args[0]);
     const auto c = static_cast<std::size_t>(t.args[argc - 3]);
-    if (kind == OperatorKind::Cholesky && a != c && overlaps(a, c))
+    if (t.symbol == "cholesky" && a != c && overlaps(a, c))
         throw std::runtime_error("unsupported partial cholesky alias");
-    if (kind == OperatorKind::Trsm) {
+    if (t.symbol == "trsm") {
         const auto factor = static_cast<std::size_t>(t.args[1]);
         if ((a != c && overlaps(a, c)) || overlaps(factor, c) || overlaps(factor, a))
             throw std::runtime_error("unsupported trsm alias");
     }
-    if (kind == OperatorKind::Madd) {
+    if (t.symbol == "madd") {
         const auto input_b = static_cast<std::size_t>(t.args[1]);
         if ((a != input_b && overlaps(a, input_b)) || overlaps(c, a) || overlaps(c, input_b))
             throw std::runtime_error("unsupported madd alias");
@@ -333,38 +315,36 @@ void validate_task(const dag::Task &t, OperatorKind kind, std::uint32_t n, std::
         require_region(t.reads, "L", a, b, b, n);
         if (argc == 5)
             require_region(t.reads, "L", static_cast<std::size_t>(t.args[1]), b, b, n);
-        if (kind == OperatorKind::Madd)
+        if (t.symbol == "madd")
             require_region(t.reads, "L", c, b, b, n);
         require_region(t.writes, "L", c, b, b, n);
     }
 }
-void invoke(const dag::Task &t, OperatorKind kind, const std::vector<double> &a,
-            std::vector<double> &l, int n, int b) {
-    double *p = l.data();
-    switch (kind) {
-    case OperatorKind::Cholesky:
-        cholesky(p + t.args[0], p + t.args[1], b, n);
+void invoke(const dag::Task &t, const std::vector<double> &a, std::vector<double> &l, int n,
+            int b) {
+    if (t.symbol == "scalar_expression") {
+        scalar_expression(t, static_cast<std::size_t>(n), a.data(), l.data());
         return;
-    case OperatorKind::Trsm:
-        trsm(p + t.args[0], p + t.args[1], p + t.args[2], b, n);
-        return;
-    case OperatorKind::Madd:
-        madd(p + t.args[0], p + t.args[1], p + t.args[2], b, n);
-        return;
-    case OperatorKind::Scalar:
-        scalar_expression(t, static_cast<std::size_t>(n), a.data(), p);
-        return;
-    case OperatorKind::Copy:
+    }
+    if (t.symbol == "__copy") {
         std::copy(a.begin(), a.end(), l.begin());
         return;
-    case OperatorKind::ZeroUpper:
+    }
+    if (t.symbol == "__zero_upper") {
         for (int row = 0; row < n; ++row)
             std::fill(l.begin() + static_cast<std::size_t>(row) * n + row + 1,
                       l.begin() + static_cast<std::size_t>(row + 1) * n, 0.0);
         return;
-    case OperatorKind::Unknown:
-        throw std::runtime_error("unbound operator: " + t.symbol);
     }
+    double *p = l.data();
+    if (t.symbol == "cholesky")
+        cholesky(p + t.args[0], p + t.args[1], b, n);
+    else if (t.symbol == "trsm")
+        trsm(p + t.args[0], p + t.args[1], p + t.args[2], b, n);
+    else if (t.symbol == "madd")
+        madd(p + t.args[0], p + t.args[1], p + t.args[2], b, n);
+    else
+        throw std::runtime_error("unbound operator: " + t.symbol);
 }
 struct CaseStats {
     std::uint32_t n, b;
@@ -596,12 +576,12 @@ int main(int argc, char **argv) {
                 throw dag::ResourceLimit("matrix buffers leave insufficient execution memory");
             limits.memory_bytes = case_budget;
             diagnosed_case_budget = case_budget;
-            const auto workspace = [&](const dag::Task &task, OperatorKind kind) -> std::size_t {
+            const auto workspace = [&](const dag::Task &task) -> std::size_t {
                 // ABI workspace estimates belong to the operator binding, not
                 // to an algorithm formula. The demo's only block scratch is trsm.
-                if (kind == OperatorKind::Trsm)
+                if (task.symbol == "trsm")
                     return static_cast<std::size_t>(b) * b * sizeof(double);
-                if (kind == OperatorKind::Scalar)
+                if (task.symbol == "scalar_expression")
                     return task.args.size() * sizeof(double);
                 return 0;
             };
@@ -626,13 +606,10 @@ int main(int argc, char **argv) {
                 throw std::runtime_error("non-finite input matrix");
             CaseStats st{n, b, 0, 0, 0, 0, 1, 0, 0, 0, 0, "serial-stream", false, {}, {}, 0, 0};
             st.case_memory_budget_bytes = case_budget;
-            const auto bound_kernel = [&](const dag::Task &task, OperatorKind kind) {
-                if (workspace(task, kind) > case_budget - 4096)
-                    throw dag::ResourceLimit("kernel workspace exceeds available execution memory");
-                invoke(task, kind, a, l, static_cast<int>(n), static_cast<int>(b));
-            };
             const auto kernel = [&](const dag::Task &task) {
-                bound_kernel(task, operator_kind(task));
+                if (workspace(task) > case_budget - 4096)
+                    throw dag::ResourceLimit("kernel workspace exceeds available execution memory");
+                invoke(task, a, l, static_cast<int>(n), static_cast<int>(b));
             };
             if (!stream) {
                 const auto prep_start = Clock::now();
@@ -687,16 +664,15 @@ int main(int argc, char **argv) {
                     resource_stage = "task-validation";
                     std::size_t scratch_per_worker = 0, numerical_calls = 0;
                     long double work_units = 0;
-                    const long double cube = static_cast<long double>(b) * b * b;
                     for (const auto &task : tasks) {
-                        const auto kind = operator_kind(task);
-                        validate_task(task, kind, n, b, options.audit);
-                        scratch_per_worker = std::max(scratch_per_worker, workspace(task, kind));
-                        if (kind != OperatorKind::Copy && kind != OperatorKind::ZeroUpper) {
+                        validate_task(task, n, b, options.audit);
+                        scratch_per_worker = std::max(scratch_per_worker, workspace(task));
+                        if (task.symbol != "__copy" && task.symbol != "__zero_upper") {
                             ++numerical_calls;
-                            if (kind == OperatorKind::Cholesky) work_units += cube / 3;
-                            else if (kind == OperatorKind::Trsm) work_units += cube;
-                            else if (kind == OperatorKind::Madd) work_units += 2 * cube;
+                            const long double cube = static_cast<long double>(b) * b * b;
+                            if (task.symbol == "cholesky") work_units += cube / 3;
+                            else if (task.symbol == "trsm") work_units += cube;
+                            else if (task.symbol == "madd") work_units += 2 * cube;
                             else work_units += task.args.size();
                         }
                     }
@@ -724,12 +700,12 @@ int main(int argc, char **argv) {
                         if (executor)
                             executor->set_memory_budget(parallel_budget);
                         std::optional<dag::Task> pre_stage, post_stage;
-                        if (!tasks.empty() && operator_kind(tasks.front()) == OperatorKind::Copy) {
+                        if (!tasks.empty() && tasks.front().symbol == "__copy") {
                             pre_stage = std::move(tasks.front());
                             tasks.erase(tasks.begin());
                             ++st.phase_tasks;
                         }
-                        if (!tasks.empty() && operator_kind(tasks.back()) == OperatorKind::ZeroUpper) {
+                        if (!tasks.empty() && tasks.back().symbol == "__zero_upper") {
                             post_stage = std::move(tasks.back());
                             tasks.pop_back();
                             ++st.phase_tasks;
@@ -784,9 +760,8 @@ int main(int argc, char **argv) {
                 resource_stage = "serial-execution";
                 const auto exec_start = Clock::now();
                 dag::enumerate_program(program, {n, b}, limits, [&](const dag::Task &task) {
-                    const auto kind = operator_kind(task);
-                    validate_task(task, kind, n, b, options.audit);
-                    bound_kernel(task, kind);
+                    validate_task(task, n, b, options.audit);
+                    kernel(task);
                     ++st.tasks;
                 });
                 st.execute = elapsed(exec_start);
