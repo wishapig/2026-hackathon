@@ -537,7 +537,19 @@ int main(int argc, char **argv) {
                                    block_sizes.capacity() * sizeof(std::uint32_t);
             if (auxiliary > memory - metadata_reserve - matrix_bytes)
                 throw dag::ResourceLimit("application memory budget exhausted");
-            const auto case_budget = memory - metadata_reserve - matrix_bytes - auxiliary;
+            // Refresh headroom for this case. The probe reports future capacity,
+            // so add back our already retained allocations before comparing it
+            // with the process-wide ceiling; do not subtract them twice.
+            const auto retained_matrices = (a.capacity() + l.capacity()) * sizeof(double);
+            const auto managed = metadata_reserve + auxiliary + retained_runtime_bytes + retained_matrices;
+            const auto fresh = dag::available_memory_budget(0, permitted_cpus);
+            const auto fresh_total = fresh > std::numeric_limits<std::size_t>::max() - managed
+                ? std::numeric_limits<std::size_t>::max() : fresh + managed;
+            const auto case_total = std::min(memory, fresh_total);
+            if (metadata_reserve > case_total || matrix_bytes > case_total - metadata_reserve ||
+                auxiliary > case_total - metadata_reserve - matrix_bytes)
+                throw dag::ResourceLimit("current available memory cannot fit matrix buffers");
+            const auto case_budget = case_total - metadata_reserve - matrix_bytes - auxiliary;
             if (case_budget < 4096)
                 throw dag::ResourceLimit("matrix buffers leave insufficient execution memory");
             limits.memory_bytes = case_budget;
@@ -586,6 +598,9 @@ int main(int argc, char **argv) {
                         throw;
                     executor.reset();
                     retained_runtime_bytes = 0;
+                    st.tasks = st.edges = st.steals = st.phase_tasks = 0;
+                    st.graph_bytes = 0;
+                    st.workers = 1;
                     st.execution_mode = "serial-resource";
                     st.resource_limited = true;
                     st.resource_reason = reason;
