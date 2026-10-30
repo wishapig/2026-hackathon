@@ -44,6 +44,12 @@ struct Task {
     std::string symbol;
     std::vector<Int> args;
     std::vector<Region> reads, writes;
+    // A compressed loop chunk: args describe its first iteration and regions
+    // cover the aggregate accesses of all iterations. steps stores argument
+    // deltas followed by per-iteration read/write offset deltas.
+    // repeat==1 is the ordinary task representation.
+    std::size_t repeat = 1;
+    std::vector<Int> steps;
 };
 struct Parameters {
     Int n = 0, b = 0;
@@ -53,6 +59,12 @@ struct Limits {
     // Zero means no user-imposed total-work limit; arithmetic remains checked.
     std::size_t max_tasks = 0;
     std::size_t max_steps = 0;
+    // Explicit opt-in chunk size for a direct Call body of a For loop.
+    // Zero/one preserves the fully expanded representation.
+    std::size_t loop_chunk = 1;
+    // If positive, override loop_chunk with this maximum number of balanced
+    // contiguous parts per independent loop. Shorter loops remain expanded.
+    std::size_t loop_parts = 0;
 };
 // Resource exhaustion during preparation may select a streaming path before
 // any numerical operation. Invalid metadata and execution failures never do.

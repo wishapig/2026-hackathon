@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <limits>
 #include <map>
+#include <numeric>
 #include <set>
 #include <tuple>
 #include <utility>
@@ -23,6 +24,7 @@ std::size_t task_bytes(const std::vector<Task> &tasks) {
     for (const auto &t : tasks) {
         n = add(n, t.symbol.capacity() + 1);
         n = add(n, mul(t.args.capacity(), sizeof(Int)));
+        n = add(n, mul(t.steps.capacity(), sizeof(Int)));
         for (const auto *rs : {&t.reads, &t.writes}) {
             n = add(n, mul(rs->capacity(), sizeof(Region)));
             for (const auto &r : *rs)
@@ -99,8 +101,9 @@ struct WorkBudget {
 };
 
 // A uniform, origin-aligned rectangular partition has an exact integer identity
-// for each nonempty region. On one buffer, equal IDs mean identical regions;
-// unequal IDs mean disjoint regions. This proof depends only on access geometry,
+// for each nonempty cell. Regions may cover several vertically adjacent cells,
+// so compressed iteration ranges retain the same exact conflict semantics.
+// This proof depends only on access geometry,
 // never on task symbols, matrix parameters, or a particular algorithm's loops.
 // A different layout on any buffer falls back to the general interval analysis.
 bool grid_graph(std::vector<Task> &tasks, Budget budget, WorkBudget &work, Graph &graph) {
@@ -108,9 +111,10 @@ bool grid_graph(std::vector<Task> &tasks, Budget budget, WorkBudget &work, Graph
     struct Grid {
         const std::string *buffer;
         std::size_t rows, cols, stride, columns, first, last, base = 0;
+        std::size_t accessed_rows = 0;
     };
     struct State {
-        std::uint32_t writer = none, readers = none;
+        std::uint32_t writer = none, readers = none, final_writer = none;
     };
     struct Reader {
         std::uint32_t task, next;
@@ -123,9 +127,9 @@ bool grid_graph(std::vector<Task> &tasks, Budget budget, WorkBudget &work, Graph
                 return &grid;
         return nullptr;
     };
-    const auto cell = [](const Region &r, const Grid &g) {
-        return add(mul((r.offset / g.stride) / g.rows, g.columns),
-                   (r.offset % g.stride) / g.cols);
+    const auto cell = [](std::size_t offset, const Grid &g) {
+        return add(mul((offset / g.stride) / g.rows, g.columns),
+                   (offset % g.stride) / g.cols);
     };
     for (const auto &task : tasks)
         for (const auto *rs : {&task.reads, &task.writes})
@@ -134,28 +138,37 @@ bool grid_graph(std::vector<Task> &tasks, Budget budget, WorkBudget &work, Graph
                 if (!r.rows || !r.cols)
                     continue;
                 if (!r.stride || r.cols > r.stride || r.stride % r.cols ||
-                    (r.offset / r.stride) % r.rows || (r.offset % r.stride) % r.cols)
+                    (r.offset % r.stride) % r.cols)
                     return false;
-                accesses = add(accesses, 1);
+                const auto last = add(r.offset, mul(r.rows - 1, r.stride));
                 auto *g = find_grid(r.buffer);
                 if (!g) {
                     grow(grids, grids.size() + 1, budget);
                     grids.push_back({&r.buffer, r.rows, r.cols, r.stride, r.stride / r.cols, 0, 0});
                     g = &grids.back();
-                    g->first = g->last = cell(r, *g);
+                    g->rows = std::gcd(g->rows, r.offset / r.stride);
+                    g->first = r.offset;
+                    g->last = last;
                 } else {
-                    if (g->rows != r.rows || g->cols != r.cols || g->stride != r.stride)
+                    if (g->cols != r.cols || g->stride != r.stride)
                         return false;
-                    const auto id = cell(r, *g);
-                    g->first = std::min(g->first, id);
-                    g->last = std::max(g->last, id);
+                    if (g->rows != r.rows)
+                        g->rows = std::gcd(g->rows, r.rows);
+                    if ((r.offset / r.stride) % g->rows)
+                        g->rows = std::gcd(g->rows, r.offset / r.stride);
+                    g->first = std::min(g->first, r.offset);
+                    g->last = std::max(g->last, last);
                 }
+                g->accessed_rows = add(g->accessed_rows, r.rows);
             }
     if (grids.empty())
         return false;
 
     std::size_t count = 0;
     for (auto &g : grids) {
+        accesses = add(accesses, g.accessed_rows / g.rows);
+        g.first = cell(g.first, g);
+        g.last = cell(g.last, g);
         const auto cells = add(g.last - g.first, 1);
         // Sparse far-apart coordinates should not reserve a huge dense array.
         // Declining this representation does not reject the input or change its
@@ -170,14 +183,31 @@ bool grid_graph(std::vector<Task> &tasks, Budget budget, WorkBudget &work, Graph
         return false;
     budget.take(mul(count, sizeof(State)));
     std::vector<State> states(count);
+    // Reads after a cell's final write cannot create a future WAR edge.
+    // Forget them immediately instead of retaining a reader per loop iteration.
+    for (std::uint32_t id = 0; id < tasks.size(); ++id)
+        for (const auto &r : tasks[id].writes) {
+            if (!r.rows || !r.cols) continue;
+            const auto &g = *find_grid(r.buffer);
+            const auto start = g.base + cell(r.offset, g) - g.first;
+            for (std::size_t row = 0; row < r.rows / g.rows; ++row) {
+                work.tick();
+                states[start + row * g.columns].final_writer = id;
+            }
+        }
     std::vector<Reader> readers;
     std::uint32_t free_reader = none;
     std::vector<std::pair<std::uint32_t, std::uint32_t>> edges;
     std::vector<std::uint32_t> deps;
+    // A packed range often encounters the same predecessor in many cells.
+    // Record it once rather than materializing and sorting those repetitions.
+    budget.take(mul(tasks.size(), sizeof(std::uint32_t)));
+    std::vector<std::uint32_t> dependency_epoch(tasks.size(), none);
     for (std::uint32_t id = 0; id < tasks.size(); ++id) {
         deps.clear();
         const auto dependency = [&](std::uint32_t src) {
-            if (src != none && src != id) {
+            if (src != none && src != id && dependency_epoch[src] != id) {
+                dependency_epoch[src] = id;
                 grow(deps, deps.size() + 1, budget);
                 deps.push_back(src);
             }
@@ -185,44 +215,47 @@ bool grid_graph(std::vector<Task> &tasks, Budget budget, WorkBudget &work, Graph
         const auto access = [&](const Region &r, bool write) {
             if (!r.rows || !r.cols)
                 return;
-            work.tick();
             const auto &g = *find_grid(r.buffer);
-            auto &state = states[g.base + cell(r, g) - g.first];
-            dependency(state.writer);
-            if (write) {
-                auto current = state.readers;
-                while (current != none) {
-                    auto &reader = readers[current];
-                    dependency(reader.task);
-                    const auto next = reader.next;
-                    reader.next = free_reader;
-                    free_reader = current;
-                    current = next;
+            const auto start = g.base + cell(r.offset, g) - g.first;
+            const auto cells = r.rows / g.rows;
+            for (std::size_t row = 0; row < cells; ++row) {
+                work.tick();
+                auto &state = states[start + row * g.columns];
+                dependency(state.writer);
+                if (write) {
+                    auto current = state.readers;
+                    while (current != none) {
+                        auto &reader = readers[current];
+                        dependency(reader.task);
+                        const auto next = reader.next;
+                        reader.next = free_reader;
+                        free_reader = current;
+                        current = next;
+                    }
+                    state.readers = none;
+                    state.writer = id;
+                } else if (state.final_writer != none && id < state.final_writer &&
+                           (state.readers == none || readers[state.readers].task != id)) {
+                    std::uint32_t current;
+                    if (free_reader != none) {
+                        current = free_reader;
+                        free_reader = readers[current].next;
+                    } else {
+                        if (readers.size() >= none)
+                            throw std::runtime_error("grid reader ID capacity exceeded");
+                        current = static_cast<std::uint32_t>(readers.size());
+                        grow(readers, readers.size() + 1, budget);
+                        readers.push_back({0, none});
+                    }
+                    readers[current] = {id, state.readers};
+                    state.readers = current;
                 }
-                state.readers = none;
-                state.writer = id;
-            } else if (state.readers == none || readers[state.readers].task != id) {
-                std::uint32_t current;
-                if (free_reader != none) {
-                    current = free_reader;
-                    free_reader = readers[current].next;
-                } else {
-                    if (readers.size() >= none)
-                        throw std::runtime_error("grid reader ID capacity exceeded");
-                    current = static_cast<std::uint32_t>(readers.size());
-                    grow(readers, readers.size() + 1, budget);
-                    readers.push_back({0, none});
-                }
-                readers[current] = {id, state.readers};
-                state.readers = current;
             }
         };
         for (const auto &r : tasks[id].reads)
             access(r, false);
         for (const auto &r : tasks[id].writes)
             access(r, true);
-        std::sort(deps.begin(), deps.end());
-        deps.erase(std::unique(deps.begin(), deps.end()), deps.end());
         grow(edges, add(edges.size(), deps.size()), budget);
         for (auto src : deps)
             edges.emplace_back(src, id);

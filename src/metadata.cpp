@@ -1038,11 +1038,142 @@ struct Evaluator {
             }
         }
     }
+    // Return the exact change per loop iteration. Nonlinear expressions decline
+    // compression; their ordinary interpreter path remains unchanged.
+    bool affine_delta(const BoundExpr &e, std::size_t slot, Int step,
+                      const std::vector<Int> &values, Int &delta) {
+        if (e.code == Code::Literal) { delta = 0; return true; }
+        if (e.code == Code::Variable) { delta = e.slot == slot ? step : 0; return true; }
+        Int a = 0, b = 0;
+        if (e.args.empty() || !affine_delta(e.args[0], slot, step, values, a)) return false;
+        if (!a && (e.code == Code::And || e.code == Code::Or)) {
+            const auto left = eval(e.args[0], values);
+            if ((e.code == Code::And && !left) || (e.code == Code::Or && left)) {
+                delta = 0;
+                return true;
+            }
+        }
+        __int128 result = 0;
+        if (e.code == Code::Neg) result = -static_cast<__int128>(a);
+        else if (e.args.size() == 1) {
+            if (a) return false;
+        } else {
+            if (!affine_delta(e.args[1], slot, step, values, b)) return false;
+            if (e.code == Code::Add) result = static_cast<__int128>(a) + b;
+            else if (e.code == Code::Sub) result = static_cast<__int128>(a) - b;
+            else if (e.code == Code::Mul) {
+                if (a && b) return false;
+                if (a) result = static_cast<__int128>(a) * eval(e.args[1], values);
+                else if (b) result = static_cast<__int128>(b) * eval(e.args[0], values);
+            } else if (a || b) return false;
+        }
+        if (result < std::numeric_limits<Int>::min() || result > std::numeric_limits<Int>::max())
+            return false;
+        delta = static_cast<Int>(result);
+        return true;
+    }
+    bool pack_loop(BoundNode &loop, std::vector<Int> &values, Int first, Int last, Int step) {
+        if ((!limits.loop_parts && limits.loop_chunk <= 1) || limits.max_steps || loop.body.size() != 1 ||
+            loop.body[0].source->kind != Node::Kind::Call) return false;
+        const auto trip128 = (static_cast<__int128>(last) - first + step - 1) / step;
+        if (trip128 < 2 || trip128 > std::numeric_limits<std::size_t>::max()) return false;
+        const auto trip = static_cast<std::size_t>(trip128);
+        // No affine analysis or scratch copies when there is already at most
+        // one iteration per desired part.
+        if (limits.loop_parts && trip <= limits.loop_parts) return false;
+        auto &call = loop.body[0];
+        Task base = call.scratch;
+        base.steps.assign(base.args.size() + base.reads.size() + base.writes.size(), 0);
+        values[loop.slot] = first;
+        for (std::size_t a = 0; a < call.args.size(); ++a)
+            if (!affine_delta(call.args[a], loop.slot, step, values, base.steps[a])) return false;
+        std::size_t at = base.args.size();
+        for (const auto *rs : {&call.reads, &call.writes})
+            for (const auto &r : *rs) {
+                Int d;
+                if (!affine_delta(r.rows, loop.slot, step, values, d) || d ||
+                    !affine_delta(r.cols, loop.slot, step, values, d) || d ||
+                    !affine_delta(r.stride, loop.slot, step, values, d) || d ||
+                    !affine_delta(r.offset, loop.slot, step, values, base.steps[at++])) return false;
+            }
+        for (std::size_t a = 0; a < call.args.size(); ++a) base.args[a] = eval(call.args[a], values);
+        for (std::size_t r = 0; r < call.reads.size(); ++r) region(call.reads[r], values, base.reads[r]);
+        for (std::size_t r = 0; r < call.writes.size(); ++r) region(call.writes[r], values, base.writes[r]);
+        at = base.args.size();
+        for (const auto *rs : {&base.reads, &base.writes})
+            for (const auto &r : *rs) {
+                const auto delta = base.steps[at++];
+                if (delta < 0 || (delta && static_cast<__int128>(delta) !=
+                                              static_cast<__int128>(r.rows) * r.stride)) return false;
+                if (delta && static_cast<__int128>(r.rows) * trip >
+                                 std::numeric_limits<std::size_t>::max()) return false;
+            }
+        // Independent iterations may share reads, but no iteration may write a
+        // region accessed by another. Exact vertical bands cover the supported
+        // layout; unfamiliar geometry simply keeps the original task path.
+        const auto independent = [&](const Region &w, Int wd, const Region &r, Int rd) {
+            if (w.buffer != r.buffer || !w.rows || !w.cols || !r.rows || !r.cols) return true;
+            const auto wr = static_cast<__int128>(w.rows) * (wd ? trip : 1);
+            const auto rr = static_cast<__int128>(r.rows) * (rd ? trip : 1);
+            const auto we = static_cast<__int128>(w.offset) + (wr - 1) * w.stride + w.cols;
+            const auto re = static_cast<__int128>(r.offset) + (rr - 1) * r.stride + r.cols;
+            if (we <= r.offset || re <= w.offset) return true;
+            if (!w.stride || w.stride != r.stride) return false;
+            const auto wc = w.offset % w.stride, rc = r.offset % r.stride;
+            if (w.cols > w.stride - wc || r.cols > r.stride - rc) return false;
+            if (wc + w.cols <= rc || rc + r.cols <= wc) return true;
+            const auto wy = w.offset / w.stride, ry = r.offset / r.stride;
+            if (static_cast<__int128>(wy) + wr <= ry ||
+                static_cast<__int128>(ry) + rr <= wy) return true;
+            return wd > 0 && wd == rd && wy == ry;
+        };
+        for (std::size_t w = 0; w < base.writes.size(); ++w) {
+            const auto wd = base.steps[base.args.size() + base.reads.size() + w];
+            at = base.args.size();
+            for (const auto *rs : {&base.reads, &base.writes})
+                for (const auto &r : *rs)
+                    if (!independent(base.writes[w], wd, r, base.steps[at++])) return false;
+        }
+        // Every intermediate expression is affine or invariant. Checking both
+        // endpoints preserves source integer and region bounds over the range.
+        values[loop.slot] = checked(static_cast<__int128>(first) + (trip128 - 1) * step);
+        for (const auto &arg : call.args) (void)eval(arg, values);
+        Region endpoint;
+        for (const auto *rs : {&call.reads, &call.writes})
+            for (const auto &r : *rs) region(r, values, endpoint);
+        const auto after = checked(static_cast<__int128>(first) + trip128 * step);
+        Task packed = base;
+        const auto part_size = limits.loop_parts ? trip / limits.loop_parts : 0;
+        const auto larger_parts = limits.loop_parts ? trip % limits.loop_parts : 0;
+        for (std::size_t begin = 0, part = 0; begin < trip; ++part) {
+            packed.repeat = limits.loop_parts ? part_size + (part < larger_parts)
+                                             : std::min(limits.loop_chunk, trip - begin);
+            for (std::size_t a = 0; a < base.args.size(); ++a)
+                packed.args[a] = static_cast<Int>(static_cast<__int128>(base.args[a]) +
+                                                 static_cast<__int128>(begin) * base.steps[a]);
+            at = base.args.size();
+            for (unsigned writing = 0; writing < 2; ++writing) {
+                const auto &from = writing ? base.writes : base.reads;
+                auto &to = writing ? packed.writes : packed.reads;
+                for (std::size_t r = 0; r < from.size(); ++r) {
+                    const auto delta = base.steps[at++];
+                    to[r].offset = static_cast<std::size_t>(static_cast<__int128>(from[r].offset) +
+                                                          static_cast<__int128>(begin) * delta);
+                    to[r].rows = from[r].rows * (delta ? packed.repeat : 1);
+                }
+            }
+            if (packed.repeat == 1) packed.steps.clear();
+            publish(packed);
+            begin += packed.repeat;
+        }
+        values[loop.slot] = after;
+        return true;
+    }
     void publish(const Task &t) {
-        if (count == std::numeric_limits<std::size_t>::max() ||
-            (limits.max_tasks && count >= limits.max_tasks))
+        if (t.repeat > std::numeric_limits<std::size_t>::max() - count ||
+            (limits.max_tasks && (count > limits.max_tasks || t.repeat > limits.max_tasks - count)))
             throw std::runtime_error("task count budget exceeded");
-        ++count;
+        count += t.repeat;
         emit(t);
     }
     void run(std::vector<BoundNode> &nodes, std::vector<Int> &values) {
@@ -1063,6 +1194,7 @@ struct Evaluator {
                 if (step <= 0)
                     throw std::runtime_error("nonpositive loop step");
                 for (auto *call : node.scope_calls) call->fields_initialized = false;
+                if (pack_loop(node, values, first, last, step)) break;
                 for (Int i = first; i < last;) {
                     tick();
                     values[node.slot] = i;
@@ -1264,6 +1396,7 @@ std::vector<Task> instantiate(const Program &program, Parameters p, const Limits
     std::size_t bytes = 0;
     execute_bound(program, bound, p, elements, limits, [&](const Task &t) {
         std::size_t cost = sizeof(Task) + t.symbol.size() + 1 + t.args.size() * sizeof(Int);
+        cost += t.steps.size() * sizeof(Int);
         for (auto &r : t.reads)
             cost += sizeof(Region) + r.buffer.size() + 1;
         for (auto &r : t.writes)

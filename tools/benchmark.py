@@ -52,6 +52,8 @@ def add_controls(parser, default_mode='auto', public_only=False):
     parser.add_argument('--mode', choices=['auto', 'parallel', 'serial'])
     parser.add_argument('--batch', type=int)
     parser.add_argument('--backend', choices=['atomic', 'owner'])
+    parser.add_argument('--loop-chunk', type=int)
+    parser.add_argument('--loop-parts', type=int)
     if not public_only:
         parser.add_argument('--io-format', choices=['public', 'original'])
         parser.add_argument('--application', choices=['blocked', 'scalar'])
@@ -81,6 +83,13 @@ def execution_environment(args, parser):
             env[key] = fallback
             defaults[key] = fallback
         setattr(args, attr, int(env[key]) if attr in ('threads', 'batch') else env[key])
+    for attr, key in (('loop_chunk', 'DAG_LOOP_CHUNK'), ('loop_parts', 'DAG_LOOP_PARTS')):
+        value = getattr(args, attr, None)
+        if value is not None:
+            if value < 0:
+                parser.error('--' + attr.replace('_', '-') + ' must be nonnegative')
+            env[key] = str(value)
+            explicit[key] = str(value)
     for attr, key in RESOURCE_OPTIONS.items():
         value = getattr(args, attr)
         if value is not None:
@@ -841,6 +850,14 @@ def estimate_schedule(argv):
     p.add_argument('--graph-memory-mb', type=int, default=1024)
     p.add_argument('--max-tasks', type=int, default=0)
     p.add_argument('--max-steps', type=int, default=0)
+    p.add_argument('--loop-chunk', type=int, default=1,
+                   help='maximum iterations represented by one compressed task')
+    p.add_argument('--loop-parts', type=int, default=0,
+                   help='maximum balanced parts per affine For; overrides loop-chunk when positive')
+    p.add_argument('--calibration-in', type=Path,
+                   help='reuse operator timing samples from a prior estimator run')
+    p.add_argument('--calibration-out', type=Path,
+                   help='write operator timing samples for reuse by another run')
     p.add_argument('--backend', choices=['atomic', 'owner'], default='atomic')
     p.add_argument('--policy', choices=['current', 'fifo'], nargs='+', default=['current', 'fifo'])
     p.add_argument('--task-overhead-ns', type=int, default=0)
@@ -849,7 +866,7 @@ def estimate_schedule(argv):
     a = p.parse_args(argv)
     if a.n < 3 or a.b < 1 or a.n % a.b or a.samples < 1 or a.warmups < 0:
         p.error('require n>=3, b>0, n%b==0, samples>=1 and warmups>=0')
-    if any(w < 1 for w in a.workers) or any(x < 0 for x in (a.graph_memory_mb, a.max_tasks, a.max_steps, a.task_overhead_ns)):
+    if any(w < 1 for w in a.workers) or any(x < 0 for x in (a.graph_memory_mb, a.max_tasks, a.max_steps, a.task_overhead_ns, a.loop_chunk, a.loop_parts)):
         p.error('workers and resource limits must be positive/nonnegative')
     exe = a.dag_estimate or (a.metadata.resolve().parent / 'dag_estimate')
     if not exe.exists():
@@ -857,15 +874,22 @@ def estimate_schedule(argv):
     base = [str(exe), '--metadata', str(a.metadata.resolve()), '--n', str(a.n), '--b', str(a.b),
             '--workers', ','.join(map(str, a.workers)), '--samples', str(a.samples), '--warmups', str(a.warmups),
             '--graph-memory-mb', str(a.graph_memory_mb), '--max-tasks', str(a.max_tasks), '--max-steps', str(a.max_steps),
-            '--policy', a.policy[0], '--task-overhead-ns', str(a.task_overhead_ns)]
+            '--loop-chunk', str(a.loop_chunk), '--loop-parts', str(a.loop_parts),
+            '--policies', ','.join(a.policy), '--task-overhead-ns', str(a.task_overhead_ns)]
+    if a.calibration_in:
+        base += ['--calibration-in', str(a.calibration_in.resolve())]
+    if a.calibration_out:
+        a.calibration_out.parent.mkdir(parents=True, exist_ok=True)
+        base += ['--calibration-out', str(a.calibration_out.resolve())]
     run = subprocess.run(base, capture_output=True, text=True)
     report = {'command': 'estimate-schedule', 'configuration': {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(a).items()} ,
               'host': {'platform': platform.platform(), 'logical_cpus': os.cpu_count()},
               'metadata': {'path': str(a.metadata.resolve()), 'bytes': a.metadata.stat().st_size, 'sha256': digest(a.metadata)},
               'kernel_library': 'linked by dag_estimate (current CMake kernel target)',
               'backend': a.backend, 'assumptions': ['MODEL ONLY', 'NOT AN END-TO-END PERFORMANCE RESULT', 'NOT A CORRECTNESS RESULT',
-                 'cold/uncached approximation with warmups=0 by default; each sample reinitializes buffers outside timing',
+                 'warmups=0 by default; samples initialize buffers outside timing, which does not guarantee cold caches',
                  'single-threaded kernel calibration; no cache contention, bandwidth, NUMA, synchronization, wakeup or frequency effects',
+                 'scheduler model is atomic/current or FIFO only; --backend is recorded for runtime comparison and does not model owner inbox routing',
                  'copy, zero_upper, metadata decode, expansion, graph build, allocation and executor startup are excluded from modeled kernel work'],
               'performance_eligible': False, 'correctness_validated': False}
     if run.returncode:
@@ -874,13 +898,8 @@ def estimate_schedule(argv):
     else:
         try:
             report.update(json.loads(run.stdout))
-            report['results_by_policy'] = {a.policy[0]: report.get('results', [])}
-            for pol in a.policy[1:]:
-                rr = subprocess.run(base[:base.index('--policy')]+['--policy', pol]+base[base.index('--policy')+2:], capture_output=True, text=True)
-                if rr.returncode:
-                    report.setdefault('policy_errors', {})[pol] = rr.stderr.strip()
-                else:
-                    report['results_by_policy'][pol] = json.loads(rr.stdout).get('results', [])
+            report['results_by_policy'] = {pol: [x for x in report.get('results', []) if x.get('policy') == pol]
+                                           for pol in a.policy}
             report['status'] = 'ok'
             svg = a.report.with_suffix('.svg')
             vals = [('baseline', report.get('baseline_timing', {}).get('median', 0.0))]
@@ -890,6 +909,7 @@ def estimate_schedule(argv):
             bars = ''.join('<text x="10" y="%d">%s</text><rect x="120" y="%d" width="%.1f" height="16" fill="#4472c4"/><text x="%d" y="%d">%.6g s</text>'
                            % (25+i*25, name, 10+i*25, 300*v/scale, 130+300*v/scale, 23+i*25, v)
                            for i, (name, v) in enumerate(vals))
+            svg.parent.mkdir(parents=True, exist_ok=True)
             svg.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="520" height="%d"><text x="10" y="15">DAG model vs demo baseline (diagnostic)</text>%s</svg>\n'
                            % (35+25*len(vals), bars))
             report['comparison_plot'] = str(svg.resolve())

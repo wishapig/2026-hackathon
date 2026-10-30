@@ -251,6 +251,20 @@ void scalar_expression(const dag::Task &t, std::size_t n, const double *a = null
         l[dest] = stack.back();
 }
 void validate_task(const dag::Task &t, std::uint32_t n, std::uint32_t b, bool audit) {
+    if (audit && t.repeat > 1) {
+        const auto expected = t.args.size() + t.reads.size() + t.writes.size();
+        if (t.steps.size() != expected)
+            throw std::runtime_error("invalid compressed task steps");
+        dag::Task one = t;
+        one.repeat = 1;
+        one.steps.clear();
+        std::size_t at = t.args.size();
+        for (auto *rs : {&one.reads, &one.writes})
+            for (auto &r : *rs)
+                if (t.steps[at++] != 0) r.rows /= t.repeat;
+        validate_task(one, n, b, audit);
+        return;
+    }
     const auto nn = static_cast<std::size_t>(n) * n;
     if (audit) {
         for (const auto *regions : {&t.reads, &t.writes})
@@ -331,8 +345,8 @@ void validate_task(const dag::Task &t, std::uint32_t n, std::uint32_t b, bool au
         require_region(t.writes, "L", c, b, b, n);
     }
 }
-void invoke(const dag::Task &t, const Matrix &a, Matrix &l, int n,
-            int b) {
+void invoke_once(const dag::Task &t, const Matrix &a, Matrix &l, int n,
+                 int b) {
     if (t.symbol == "scalar_expression") {
         scalar_expression(t, static_cast<std::size_t>(n), a.data(), l.data());
         return;
@@ -356,6 +370,59 @@ void invoke(const dag::Task &t, const Matrix &a, Matrix &l, int n,
         madd(p + t.args[0], p + t.args[1], p + t.args[2], b, n);
     else
         throw std::runtime_error("unbound operator: " + t.symbol);
+}
+void invoke(const dag::Task &t, const Matrix &a, Matrix &l, int n,
+            int b) {
+    if (t.repeat > 1) {
+        const auto argc = t.args.size();
+        const auto step = [&](std::size_t i) { return t.steps[i]; };
+        double *p = l.data();
+        if (t.symbol == "cholesky") {
+            auto x = t.args[0], y = t.args[1];
+            const auto dx = static_cast<std::ptrdiff_t>(step(0));
+            const auto dy = static_cast<std::ptrdiff_t>(step(1));
+            for (std::size_t rep = 0; rep < t.repeat; ++rep) {
+                cholesky(p + x, p + y, b, n); x += dx; y += dy;
+            }
+        } else if (t.symbol == "trsm") {
+            auto x = t.args[0], y = t.args[1], z = t.args[2];
+            const auto dx = static_cast<std::ptrdiff_t>(step(0));
+            const auto dy = static_cast<std::ptrdiff_t>(step(1));
+            const auto dz = static_cast<std::ptrdiff_t>(step(2));
+            for (std::size_t rep = 0; rep < t.repeat; ++rep) {
+                trsm(p + x, p + y, p + z, b, n); x += dx; y += dy; z += dz;
+            }
+        } else if (t.symbol == "madd") {
+            auto x = t.args[0], y = t.args[1], z = t.args[2];
+            const auto dx = static_cast<std::ptrdiff_t>(step(0));
+            const auto dy = static_cast<std::ptrdiff_t>(step(1));
+            const auto dz = static_cast<std::ptrdiff_t>(step(2));
+            for (std::size_t rep = 0; rep < t.repeat; ++rep) {
+                madd(p + x, p + y, p + z, b, n); x += dx; y += dy; z += dz;
+            }
+        } else {
+            // Keep the generic compressed path for scalar and future
+            // operators; dispatch each iteration through the ordinary ABI.
+            dag::Task one = t;
+            one.repeat = 1;
+            one.steps.clear();
+            std::size_t region_step = argc;
+            for (auto *regions : {&one.reads, &one.writes})
+                for (auto &r : *regions)
+                    if (step(region_step++) != 0) r.rows /= t.repeat;
+            for (std::size_t rep = 0; rep < t.repeat; ++rep) {
+                invoke_once(one, a, l, n, b);
+                if (rep + 1 == t.repeat) break;
+                for (std::size_t i = 0; i < argc; ++i)
+                    one.args[i] += step(i);
+                std::size_t at = argc;
+                for (auto &r : one.reads) r.offset += static_cast<std::size_t>(step(at++));
+                for (auto &r : one.writes) r.offset += static_cast<std::size_t>(step(at++));
+            }
+        }
+        return;
+    }
+    invoke_once(t, a, l, n, b);
 }
 struct CaseStats {
     std::uint32_t n, b;
@@ -463,6 +530,18 @@ int main(int argc, char **argv) {
         limits.memory_bytes = memory;
         limits.max_tasks = number("DAG_MAX_TASKS", 0, std::numeric_limits<std::size_t>::max());
         limits.max_steps = number("DAG_MAX_STEPS", 0, std::numeric_limits<std::size_t>::max());
+        // Zero selects balanced loop ranges; explicit chunk=1 keeps individual
+        // tasks. A loop uses half the workers so adjacent ready loops can share
+        // the pool. This changes task granularity, never the worker allocation.
+        limits.loop_chunk = scalar_application ? 1 : number(
+            "DAG_LOOP_CHUNK", 0, std::numeric_limits<std::size_t>::max());
+        limits.loop_parts = scalar_application ? 0 : number(
+            "DAG_LOOP_PARTS", 0, std::numeric_limits<std::size_t>::max());
+        const bool auto_loop_compression = !limits.loop_chunk && !limits.loop_parts;
+        if (auto_loop_compression) {
+            const auto workers = options.threads ? options.threads : permitted_cpus.size();
+            limits.loop_parts = std::max<std::size_t>(1, (workers + 1) / 2);
+        }
         const auto graph_mb = number("DAG_GRAPH_MEMORY_MB", 0,
                                     std::numeric_limits<std::size_t>::max() / (1024 * 1024));
         const auto graph_budget = graph_mb * 1024 * 1024;
@@ -730,12 +809,13 @@ int main(int argc, char **argv) {
                             validate_task(task, n, b, options.audit);
                             scratch_per_worker = std::max(scratch_per_worker, workspace(task));
                             if (task.symbol != "__copy" && task.symbol != "__zero_upper") {
-                                ++numerical_calls;
+                                const auto repeat = std::max<std::size_t>(task.repeat, 1);
+                                numerical_calls += repeat;
                                 const long double cube = static_cast<long double>(b) * b * b;
-                                if (task.symbol == "cholesky") work_units += cube / 3;
-                                else if (task.symbol == "trsm") work_units += cube;
-                                else if (task.symbol == "madd") work_units += 2 * cube;
-                                else work_units += task.args.size();
+                                if (task.symbol == "cholesky") work_units += repeat * cube / 3;
+                                else if (task.symbol == "trsm") work_units += repeat * cube;
+                                else if (task.symbol == "madd") work_units += repeat * 2 * cube;
+                                else work_units += repeat * task.args.size();
                             }
                         }
                         // Few calls can still be expensive: more available cores
@@ -752,7 +832,7 @@ int main(int argc, char **argv) {
                             numerical_started = true;
                             for (const auto &task : tasks) {
                                 kernel(task);
-                                ++st.tasks;
+                                st.tasks += task.repeat;
                             }
                             st.execute = elapsed(exec_start);
                         } else {
@@ -802,7 +882,7 @@ int main(int argc, char **argv) {
                                 if (pre_stage)
                                     kernel(*pre_stage);
                             });
-                            st.tasks = result.tasks + st.phase_tasks;
+                            st.tasks = numerical_calls + st.phase_tasks;
                             st.edges = result.edges;
                             st.steals = result.steals;
                             st.workers = result.workers;
@@ -827,10 +907,12 @@ int main(int argc, char **argv) {
             if (stream) {
                 resource_stage = "serial-execution";
                 const auto exec_start = Clock::now();
-                dag::enumerate_program(program, {n, b}, limits, [&](const dag::Task &task) {
+                auto stream_limits = limits;
+                if (auto_loop_compression) stream_limits.loop_parts = 1;
+                dag::enumerate_program(program, {n, b}, stream_limits, [&](const dag::Task &task) {
                     validate_task(task, n, b, options.audit);
                     kernel(task);
-                    ++st.tasks;
+                    st.tasks += std::max<std::size_t>(task.repeat, 1);
                 });
                 st.execute = elapsed(exec_start);
             }
