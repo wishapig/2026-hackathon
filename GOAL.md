@@ -153,6 +153,7 @@ manifest 至少包括：源码 commit、benchmark 工具版本、输入/规格/�
 | P002 | 4416907b582b3c0201e92425dbaf0db046c814fd | 本地x86-64/demo | Release; portable-default auto/atomic/0线程/batch1 | 504 | 0.30625472 | [证据](results/pareto/P002/manifest.json) | 已验收；相对P001改善，支配复测待确认 |
 | P003 | bab43941871b48a2b53980a1a58592f0ded99d77 | 本地x86-64/demo | Release; portable-default auto/atomic/0线程/batch1 | 504 | 0.29949328500000005 | [证据](results/pareto/P003/manifest.json) | 已验收；与P002噪声重叠，均保留待复测 |
 | P004 | 0b9a05223a7b9d7a9257235a496103758536d6be | 本地x86-64/demo | Release; portable-default auto/atomic/0线程/batch1 | 292 | 0.27243709000000005 | [证据](results/pareto/P004/manifest.json) | 已验收；当前领先，交错复测待确认 |
+| P005 | bbdc09e83747952d9f36948819668e115269d4d6 | 本地x86-64/demo | Release; portable-default auto/atomic/0线程/batch1 | 257 | 0.280835369 | [证据](results/pareto/P005/manifest.json) | 已验收；体积最小，与P004交错复测待定 |
 
 第一条记录应是经过本轮确认的基线；若测量时已被另一合格版本支配，仍在证据中保留其 baseline 身份，但不宣称它属于当前前沿。
 
