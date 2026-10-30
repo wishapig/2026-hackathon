@@ -152,9 +152,12 @@ struct Executor::Impl {
     std::size_t remaining_count = 0, seen_count = 0;
     const Graph *graph = nullptr;
     const std::function<void(const Task &)> *invoke = nullptr;
-    std::atomic<std::size_t> completed{0};
-    std::atomic<std::uint64_t> steals{0}, wake_sequence{0};
-    std::atomic<bool> failed{false};
+    // These have different writers/readers. Completion traffic must not invalidate
+    // the wake generation or read-mostly failure flag on every publication.
+    alignas(64) std::atomic<std::size_t> completed{0};
+    alignas(64) std::atomic<std::uint64_t> steals{0};
+    alignas(64) std::atomic<std::uint64_t> wake_sequence{0};
+    alignas(64) std::atomic<bool> failed{false};
     std::mutex control, error_mutex, wake_mutex;
     mutable std::mutex run_mutex;
     std::condition_variable start_cv, done_cv, wake_cv;
@@ -338,6 +341,30 @@ struct Executor::Impl {
     void work(unsigned worker) {
         const auto n = graph->tasks.size();
         unsigned idle_rounds = 0, round_robin = worker;
+        std::size_t pending_completed = 0;
+        std::uint64_t local_steals = 0;
+        const auto publish_completed = [&]() noexcept {
+            if (!pending_completed)
+                return;
+            const auto done = completed.fetch_add(pending_completed, std::memory_order_acq_rel) +
+                              pending_completed;
+            pending_completed = 0;
+            if (done == n) {
+                wake_sequence.fetch_add(1, std::memory_order_release);
+                wake_cv.notify_all();
+            }
+        };
+        struct FinishAccounting {
+            const decltype(publish_completed) &publish;
+            const std::uint64_t &local;
+            std::atomic<std::uint64_t> &global;
+            ~FinishAccounting() noexcept {
+                // Also publish prior completed epilogues if a later task throws.
+                publish();
+                if (local)
+                    global.fetch_add(local, std::memory_order_relaxed);
+            }
+        } finish{publish_completed, local_steals, steals};
         // Keep at most one ready successor local. The last acq_rel decrement
         // already acquires all predecessor writes, so a same-thread successor
         // does not need an extra queue round trip for memory synchronization.
@@ -368,7 +395,7 @@ struct Executor::Impl {
                             continue;
                         id = pop(other, true);
                         if (id != none) {
-                            steals.fetch_add(1, std::memory_order_relaxed);
+                            ++local_steals;
                             break;
                         }
                     }
@@ -378,7 +405,7 @@ struct Executor::Impl {
                             if (other != worker) {
                                 id = pop(other, true);
                                 if (id != none) {
-                                    steals.fetch_add(1, std::memory_order_relaxed);
+                                    ++local_steals;
                                     break;
                                 }
                             }
@@ -408,12 +435,12 @@ struct Executor::Impl {
                             send(owner, e);
                     }
                 }
-                const auto done = completed.fetch_add(1, std::memory_order_acq_rel) + 1;
+                // Dependency notification is immediate; only the aggregate
+                // termination count is buffered. It never overstates completed
+                // work, and every idle transition publishes the remainder.
+                if (++pending_completed == 32)
+                    publish_completed();
                 progress = true;
-                if (done == n) {
-                    wake_sequence.fetch_add(1, std::memory_order_release);
-                    wake_cv.notify_all();
-                }
                 if (options.backend == "owner")
                     poll(worker);
                 if (failed.load(std::memory_order_acquire))
@@ -423,6 +450,7 @@ struct Executor::Impl {
                 idle_rounds = 0;
                 continue;
             }
+            publish_completed();
             if (++idle_rounds < 32) {
                 std::this_thread::yield();
                 continue;
