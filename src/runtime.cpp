@@ -192,7 +192,7 @@ struct Executor::Impl {
                 arguments[i] = {this, i};
                 pthread_t t;
                 rc = pthread_create(&t, &attr, &Impl::entry, &arguments[i]);
-                if (rc == EAGAIN || rc == ENOMEM)
+                if (rc == ENOMEM)
                     throw ResourceLimit(std::string("pthread_create resource failure: ") +
                                         std::strerror(rc));
                 if (rc)
@@ -483,7 +483,7 @@ struct Executor::Impl {
         const auto begin = std::chrono::steady_clock::now();
         const auto n = g.tasks.size();
         if (n >= std::numeric_limits<std::uint32_t>::max())
-            throw ResourceLimit("runtime task ID overflow");
+            throw std::runtime_error("runtime task ID overflow");
         if (g.offsets.size() != n + 1 || g.indegrees.size() != n || g.offsets.empty() ||
             g.offsets.front() != 0 || g.offsets.back() != g.successors.size())
             throw std::runtime_error("invalid CSR graph");
@@ -580,6 +580,9 @@ struct Executor::Impl {
         return stats;
     }
 };
+std::size_t Executor::minimum_reserved_bytes(unsigned workers) {
+    return checked_mul(workers, worker_stack_bytes + 2 * sizeof(Queue) + 4096);
+}
 Executor::Executor(RuntimeOptions options) : impl_(std::make_unique<Impl>(std::move(options))) {}
 Executor::~Executor() = default;
 ExecutionStats Executor::run(const Graph &g, const std::function<void(const Task &)> &fn,

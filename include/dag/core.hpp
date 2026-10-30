@@ -91,6 +91,7 @@ std::vector<unsigned> allowed_node_cpus();
 // Reusable workers; constructor/destructor costs belong to the caller's timing.
 class Executor {
   public:
+    static std::size_t minimum_reserved_bytes(unsigned workers);
     explicit Executor(RuntimeOptions);
     ~Executor();
     Executor(const Executor &) = delete;
