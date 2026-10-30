@@ -374,13 +374,24 @@ int main(int argc, char **argv) {
     std::optional<std::uint32_t> active_case;
     std::uint32_t active_n = 0, active_b = 0;
     std::string resource_stage = "configuration";
+    std::size_t diagnosed_memory = 0, diagnosed_request = 0, diagnosed_graph_cap = 0;
+    std::size_t diagnosed_case_budget = 0, diagnosed_effective_graph = 0;
+    std::uint32_t completed_cases = 0;
     const auto report_resource = [&](const char *reason) {
         std::cerr << "DAG_RESOURCE_LIMIT {\"index\":";
         if (active_case) std::cerr << *active_case;
         else std::cerr << "null";
         std::cerr << ",\"n\":" << active_n << ",\"b\":" << active_b
                   << ",\"stage\":" << quoted(resource_stage)
-                  << ",\"reason\":" << quoted(reason) << "}\n";
+                  << ",\"reason\":" << quoted(reason)
+                  << ",\"memory_budget_bytes\":" << diagnosed_memory
+                  << ",\"requested_memory_bytes\":" << diagnosed_request
+                  << ",\"graph_budget_bytes\":" << diagnosed_graph_cap
+                  << ",\"case_memory_budget_bytes\":" << diagnosed_case_budget
+                  << ",\"effective_graph_budget_bytes\":" << diagnosed_effective_graph
+                  << ",\"memory_budget_source\":" << quoted(diagnosed_request ? "explicit-cap" : "automatic")
+                  << ",\"graph_budget_source\":" << quoted(diagnosed_graph_cap ? "explicit-cap" : "automatic")
+                  << ",\"completed_unvalidated_cases\":" << completed_cases << "}\n";
     };
     try {
         static_assert(sizeof(double) == 8 && sizeof(std::uint32_t) == 4,
@@ -422,8 +433,10 @@ int main(int argc, char **argv) {
         if (!memory_mb && !env("DAG_MEMORY_MB").empty())
             throw std::runtime_error("DAG_MEMORY_MB must be positive when set");
         const auto requested_memory = memory_mb * 1024 * 1024;
+        diagnosed_request = requested_memory;
         const auto permitted_cpus = dag::allowed_node_cpus();
         const auto memory = dag::available_memory_budget(requested_memory, permitted_cpus);
+        diagnosed_memory = memory;
         if (options.threads > permitted_cpus.size())
             throw std::runtime_error("DAG_THREADS exceeds allowed single-NUMA CPU set");
         pin_main(permitted_cpus);
@@ -435,6 +448,7 @@ int main(int argc, char **argv) {
         const auto graph_mb = number("DAG_GRAPH_MEMORY_MB", 0,
                                     std::numeric_limits<std::size_t>::max() / (1024 * 1024));
         const auto graph_budget = graph_mb * 1024 * 1024;
+        diagnosed_graph_cap = graph_budget;
         resource_stage = "metadata";
         dag::Program program = dag::load_metadata(metadata_path, limits);
         const auto metadata_bytes = program.artifact_bytes;
@@ -498,6 +512,8 @@ int main(int argc, char **argv) {
         std::vector<double> a, l;
         for (std::uint32_t index = 0; index < count; ++index) {
             active_case = index;
+            active_n = active_b = 0;
+            diagnosed_case_budget = diagnosed_effective_graph = 0;
             resource_stage = "input-header";
             std::uint32_t n = 0, b = 0;
             read(input, &n, 4, io_seconds);
@@ -553,6 +569,7 @@ int main(int argc, char **argv) {
             if (case_budget < 4096)
                 throw dag::ResourceLimit("matrix buffers leave insufficient execution memory");
             limits.memory_bytes = case_budget;
+            diagnosed_case_budget = case_budget;
             const auto workspace = [&](const dag::Task &task) -> std::size_t {
                 // ABI workspace estimates belong to the operator binding, not
                 // to an algorithm formula. The demo's only block scratch is trsm.
@@ -633,6 +650,7 @@ int main(int argc, char **argv) {
                     // in the catalog need not execute for this shape.
                     preparation_limits.memory_bytes = cap_graph(case_budget - pool_reserve);
                     st.effective_graph_budget_bytes = preparation_limits.memory_bytes;
+                    diagnosed_effective_graph = preparation_limits.memory_bytes;
                     resource_stage = "task-expansion";
                     // This bounded speculative expansion stops as soon as its
                     // representation no longer fits. It never runs numerical work.
@@ -699,6 +717,7 @@ int main(int argc, char **argv) {
                         preparation_limits.memory_bytes =
                             cap_graph(parallel_budget - retained_runtime_bytes);
                         st.effective_graph_budget_bytes = preparation_limits.memory_bytes;
+                    diagnosed_effective_graph = preparation_limits.memory_bytes;
                         resource_stage = "graph-construction";
                         auto graph = dag::build_graph(std::move(tasks), preparation_limits);
                         if (options.audit)
@@ -749,6 +768,7 @@ int main(int argc, char **argv) {
 
             st.compute = elapsed(case_start) - (io_seconds - io_before);
             stats.push_back(st);
+            ++completed_cases;
         }
         {
             IOTime time{io_seconds};
