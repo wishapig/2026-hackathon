@@ -758,8 +758,13 @@ def encode_lean(document, encoding='auto'):
         size >>= 7
     length.append(size)
     raw = bytes([0xa7]) + length + payload
-    compressor = zlib.compressobj(level=9, wbits=-15)
-    compressed = bytes([0xa8]) + length + compressor.compress(payload) + compressor.flush()
+    # Choose offline: both streams use the existing raw-deflate decoder and
+    # retain the same complete semantic payload for every supported program.
+    streams = []
+    for strategy in (zlib.Z_DEFAULT_STRATEGY, zlib.Z_FILTERED):
+        compressor = zlib.compressobj(level=9, wbits=-15, strategy=strategy)
+        streams.append(compressor.compress(payload) + compressor.flush())
+    compressed = bytes([0xa8]) + length + min(streams, key=len)
     if encoding == 'lean':
         return raw
     if encoding == 'lean-deflate':
