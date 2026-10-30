@@ -73,7 +73,14 @@ python3 tools/benchmark.py build/dag_run artifacts/public20.bin \
 
 每轮从启动程序、加载 Metadata、读取输入、计算到生成输出，保留完整计算时间及程序墙钟时间；随后独立校验，不把校验耗时混入性能。失败记录保留并令整体失败，只有校验成功的样本参与成功耗时统计。报告记录输入/程序/Metadata/校验器指纹与 Metadata 大小。
 
-原题面或标量应用的最终测量使用 `--io-format original`、`--application scalar`（按需），分块参数仍显式通过上述环境变量给出；基准会向程序和校验器传递同一协议配置。
+原题面或标量应用的最终测量使用 `--io-format original`、`--application scalar`（按需）。benchmark 默认清除继承的 DAG 环境设置，因此原格式分块参数必须使用显式 CLI `--block-size 100` 或 `--block-sizes 3,4,8`（按输入记录对应，二者互斥）；不能仅设置父环境的 `DAG_BLOCK_SIZE`。基准向程序和校验器传递同一协议配置。例如：
+
+```bash
+python3 tools/benchmark.py build/dag_run input-original.bin \
+  --metadata build/block_cholesky.meta --io-format original --block-size 100 \
+  --mode auto --repeats 5 --checker build/dag_check \
+  --report artifacts/performance-original.json
+```
 
 当前加强校验器使用残差、有限值、正对角线检查；指定的公开验收命令始终额外执行原包 verifier。demo/宿主结果不是正式库或 Kunpeng 成绩。多个配置依次运行，避免构建、生成器与测量并发。
 
@@ -103,6 +110,10 @@ python3 tools/benchmark.py submit build/dag_run input.bin output.bin \
   --metadata build/block_cholesky.meta \
   --configuration-report artifacts/submission-config.json
 ```
+
+正式部署优先采用这个干净入口；前面的直接环境变量调用用于明确配置的本地运行。需要目标机限制时，使用 `--threads`、`--memory-mb`、`--graph-memory-mb` 等显式 CLI 参数，或在确有需要时选择 `--inherit-env`；操作系统亲和集、cgroup 和 rlimit 不被绕过。
+
+内存受限运行保留原始耗时和失败记录，但不进入完整算法性能汇总。失败报告分别列出已校验有效、资源回退、已执行但未校验、资源失败、未运行和错误/未知的 case 数量；没有验证的先前结果不产生速度。`compare-reports` 仅比较相同输入及资源约束下的共同有效集合，输出覆盖率；资源指纹包含当前 cgroup 到可见挂载根的稳定内存/cpuset 限额，不含波动的 usage/free 计数。
 
 该入口默认自动线程与预算，避免把本地16线程或低内存限制带到目标机。确有目标资源限制时通过 `--threads`、`--memory-mb`、`--graph-memory-mb` 明确指定，OS亲和集/cgroup限制始终有效。
 

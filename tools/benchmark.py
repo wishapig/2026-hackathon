@@ -108,6 +108,72 @@ def fingerprint(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
+def cgroup_constraint_identity(membership_path=Path('/proc/self/cgroup'),
+                               mountinfo_path=Path('/proc/self/mountinfo')):
+    """Record stable limits at the process group and all visible ancestors.
+
+    Resolve cgroup mount roots like resources.hpp, including namespace-root
+    fallback. Usage/free counters are intentionally absent: they fluctuate
+    without changing the imposed resource allocation.
+    """
+    def read(path):
+        try:
+            return Path(path).read_text().strip()
+        except OSError:
+            return None
+
+    def unescape(value):
+        return re.sub(r'\\([0-7]{3})', lambda m: chr(int(m.group(1), 8)), value)
+
+    membership, mountinfo = read(membership_path), read(mountinfo_path)
+    groups = {}
+    for line in (membership or '').splitlines():
+        fields = line.split(':', 2)
+        if len(fields) != 3:
+            continue
+        _, controllers, path = fields
+        for controller in controllers.split(',') if controllers else ['unified']:
+            groups[controller] = path
+    mounts = []
+    for line in (mountinfo or '').splitlines():
+        fields = line.split(' - ', 1)
+        if len(fields) != 2:
+            continue
+        before, after = fields[0].split(), fields[1].split()
+        if len(before) < 6 or len(after) < 3:
+            continue
+        kind, _, super_options = after[:3]
+        controllers = set(super_options.split(','))
+        if kind == 'cgroup2':
+            selected = ['unified'] if 'unified' in groups else []
+            names = ['memory.max', 'cpuset.cpus', 'cpuset.mems',
+                     'cpuset.cpus.effective', 'cpuset.mems.effective']
+        elif kind == 'cgroup':
+            selected = [c for c in ('memory', 'cpuset') if c in controllers and c in groups]
+            names = (['memory.limit_in_bytes'] if 'memory' in selected else []) + (
+                ['cpuset.cpus', 'cpuset.mems', 'cpuset.effective_cpus',
+                 'cpuset.effective_mems'] if 'cpuset' in selected else [])
+        else:
+            continue
+        root, mount = Path(unescape(before[3])), Path(unescape(before[4]))
+        for controller in selected:
+            member = Path(groups[controller])
+            relative = Path(os.path.relpath(member, root))
+            safe = '..' not in relative.parts
+            group = Path(os.path.normpath(mount / relative)) if safe else mount
+            levels = []
+            while True:
+                levels.append({'path': str(group), 'limits': {name: read(group / name) for name in names}})
+                if group == mount or group.parent == group:
+                    break
+                group = group.parent
+            mounts.append({'type': kind, 'controller': controller, 'root': str(root),
+                           'mount': str(mount), 'membership': str(member),
+                           'namespace_root_fallback': not safe, 'ancestors': levels})
+    mounts.sort(key=lambda x: (x['type'], x['controller'], x['mount'], x['membership']))
+    return {'membership': membership, 'mountinfo_available': mountinfo is not None, 'mounts': mounts}
+
+
 def environment_identity(env):
     # Runtime worker counts and algorithm knobs may differ across candidates;
     # machine/allocation and externally imposed resource budgets may not.
@@ -128,12 +194,7 @@ def environment_identity(env):
                       'DAG_MEMORY_MB', 'DAG_GRAPH_MEMORY_MB', 'DAG_MAX_TASKS', 'DAG_MAX_STEPS')}}
     for key in ('DAG_GRAPH_MEMORY_MB', 'DAG_MAX_TASKS', 'DAG_MAX_STEPS'):
         allocation['budgets'][key] = str(int(env.get(key, '0')))
-    for name in ('/proc/self/cgroup', '/sys/fs/cgroup/memory.max',
-                 '/sys/fs/cgroup/cpuset.cpus.effective', '/sys/fs/cgroup/cpuset.mems.effective'):
-        try:
-            allocation[name] = Path(name).read_text().strip()
-        except OSError:
-            allocation[name] = None
+    allocation['cgroup_constraints'] = cgroup_constraint_identity()
     return allocation
 
 
@@ -192,6 +253,45 @@ def explicit_resource_failures(stderr):
     return failures
 
 
+CASE_CATEGORIES = ('valid', 'resource_limited', 'completed_unvalidated',
+                   'resource_failed', 'not_run', 'error_or_unknown')
+
+
+def classify_case_status(sample, cases):
+    """Partition case status without inventing times or numerical validation."""
+    status = {name: [] for name in CASE_CATEGORIES}
+    all_indices = [case['index'] for case in cases]
+    failures = sample.get('resource_failures', [])
+    if len(failures) == 1 and sample.get('returncode') not in (None, 0):
+        failure = failures[0]
+        index, stage = failure['index'], failure['stage']
+        if index is not None:
+            # Runtime protocol is strictly sequential: reaching i proves that
+            # earlier calls completed, not that their results were validated.
+            status['completed_unvalidated'] = [i for i in all_indices if i < index]
+            status['resource_failed'] = [index]
+            status['not_run'] = [i for i in all_indices if i > index]
+        elif stage in ('configuration', 'metadata'):
+            status['not_run'] = all_indices
+        elif stage == 'finalize':
+            status['completed_unvalidated'] = all_indices
+        else:
+            # Unknown stage or indexless evidence cannot establish progress.
+            status['error_or_unknown'] = all_indices
+    elif sample.get('correctness_passed'):
+        status['valid'] = list(sample.get('valid_case_indices', []))
+        status['resource_limited'] = [c['index'] for c in sample.get('resource_exclusions', [])]
+    elif (sample.get('returncode') == 0 and
+          len(sample.get('runtime_stats', {}).get('cases', [])) == len(cases)):
+        # The whole execution returned, but checker failure/timeout is still
+        # an error. Resource causes remain separately recorded, not excused.
+        status['completed_unvalidated'] = all_indices
+    else:
+        status['error_or_unknown'] = all_indices
+    sample['case_categories'] = status
+    sample['case_counts'] = {name: len(indices) for name, indices in status.items()}
+
+
 def classify_sample(sample, cases):
     """Failed/unchecked runs never contribute valid cases, even with a marker."""
     sample['resource_failures'] = explicit_resource_failures(sample.get('stderr', ''))
@@ -234,6 +334,7 @@ def classify_sample(sample, cases):
     sample['full_batch_eligible'] = good and not sample['resource_limited']
     sample['failure_class'] = ('none' if good else
                                'explicit_resource_failure' if sample['resource_failures'] else 'error')
+    classify_case_status(sample, cases)
 
 
 def diagnostic_scope(report, indices):
@@ -266,6 +367,12 @@ def common_diagnostic(report, indices=None):
                    'failures': s.get('resource_failures', [])} for s in samples
                   if s.get('resource_limited')],
               'invalid_samples': [s['index'] for s in samples if not s.get('correctness_passed')]}
+    result['case_status_by_sample'] = [
+        {'sample': s['index'], 'case_categories': s.get('case_categories', {}),
+         'case_counts': s.get('case_counts', {})} for s in samples]
+    result['case_sample_counts'] = {name: sum(s.get('case_counts', {}).get(name, 0) for s in samples)
+                                    for name in CASE_CATEGORIES}
+    result['case_sample_counts_unit'] = 'case appearances across measured samples; not unique cases'
     if available:
         for sample in samples:
             seconds = sum(c['compute_seconds'] for c in sample['runtime_stats']['cases']
@@ -479,6 +586,8 @@ def accept_public20(argv):
         cases = [{'index': i, 'n': n, 'b': b} for i, (n, b) in enumerate(expected)]
         classify_sample(sample, cases)
         report['resource_exclusions'] = sample['resource_exclusions']
+        report['case_categories'] = sample['case_categories']
+        report['case_counts'] = sample['case_counts']
         report['complete_performance'] = sample['full_batch_eligible']
         if sample['full_batch_eligible']:
             report['summary']['score_seconds'] = score
@@ -491,6 +600,14 @@ def accept_public20(argv):
         report['passed'] = sample['full_batch_eligible']
     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
         report['error'] = str(error)
+        if 'expected' in locals():
+            execute = report['stages'].get('execute', {})
+            sample = {'returncode': execute.get('returncode'),
+                      'resource_failures': execute.get('resource_failures', [])}
+            cases = [{'index': i, 'n': n, 'b': b} for i, (n, b) in enumerate(expected)]
+            classify_case_status(sample, cases)
+            report['case_categories'] = sample['case_categories']
+            report['case_counts'] = sample['case_counts']
         print('PUBLIC20 ACCEPTANCE: FAIL — ' + str(error), file=sys.stderr, flush=True)
     finally:
         report_path.write_text(json.dumps(report, indent=2) + '\n')
@@ -627,6 +744,10 @@ def main():
                 sample['correctness_passed'] = False
                 sample['full_batch_eligible'] = False
                 sample['valid_case_indices'] = []
+                # Invalid/mismatched evidence cannot establish any progress.
+                sample['case_categories'] = {name: [] for name in CASE_CATEGORIES}
+                sample['case_categories']['error_or_unknown'] = [c['index'] for c in report['input_cases']]
+                sample['case_counts'] = {name: len(rows) for name, rows in sample['case_categories'].items()}
                 failed = True
             report['samples'].append(sample)
             # Persist after every sample, including failed or interrupted runs.
