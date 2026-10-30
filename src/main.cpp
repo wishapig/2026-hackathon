@@ -435,7 +435,6 @@ int main(int argc, char **argv) {
         if (options.backend != "atomic" && options.backend != "owner")
             throw std::runtime_error("DAG_BACKEND must be atomic or owner");
         options.audit = number("DAG_AUDIT", 0, 1) != 0;
-        options.output_locality = number("DAG_OUTPUT_LOCALITY", 0, 1) != 0;
         const auto memory_mb =
             number("DAG_MEMORY_MB", 0, std::numeric_limits<std::size_t>::max() / (1024 * 1024));
         if (!memory_mb && !env("DAG_MEMORY_MB").empty())
@@ -823,7 +822,6 @@ int main(int argc, char **argv) {
                << ",\"memory_budget_source\":" << quoted(requested_memory ? "explicit-cap" : "automatic")
                << ",\"threads_requested\":" << options.threads
                << ",\"batch\":" << options.batch
-               << ",\"output_locality\":" << (options.output_locality ? "true" : "false")
                << ",\"max_tasks\":" << limits.max_tasks
                << ",\"max_steps\":" << limits.max_steps
                << ",\"metadata_bytes\":" << metadata_bytes
