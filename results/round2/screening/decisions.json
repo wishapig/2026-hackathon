@@ -2,25 +2,32 @@
   {
     "name": "prepare",
     "implementation_commit": "7de702a037ecb7f32502e4f32cdbcf33ca0bae5a",
-    "status": "screened, no confirmed end-to-end benefit; awaiting final selection",
+    "status": "rejected for recommendation: no reliable end-to-end gain in alternating screen; branch retained",
     "metadata_bytes": 141
   },
   {
     "name": "runtime",
     "implementation_commit": "b5e36a5f66b8f2ba4ec1dcea2b8ed945290c116c",
-    "status": "screened, no confirmed end-to-end benefit; awaiting final selection",
+    "status": "rejected for recommendation: no reliable end-to-end gain in alternating screen; branch retained",
     "metadata_bytes": 141
   },
   {
     "name": "dispatch",
     "implementation_commit": "361574c73bb2b9dc8a577a49ce4365cd98695f7a",
-    "status": "screened, no confirmed end-to-end benefit; awaiting final selection",
+    "status": "rejected for recommendation: no reliable end-to-end gain in alternating screen; branch retained",
     "metadata_bytes": 141
   },
   {
     "name": "combined",
     "implementation_commit": "109e3612dbfa22faf7b3551b6d8181015b7089f0",
-    "status": "screened, no confirmed end-to-end benefit; awaiting final selection",
+    "status": "rejected for recommendation: no reliable end-to-end gain in alternating screen; branch retained",
     "metadata_bytes": 141
+  },
+  {
+    "name": "L-only-buffer",
+    "implementation_commit": "322acfdcdd64b9cb45fa4d18739253a553b328ee",
+    "status": "not accepted alone: five measured alternating medians baseline277.972ms vs buffer282.138ms, overlapping noise",
+    "metadata_bytes": 141,
+    "evidence": "../buffer-comparison"
   }
 ]
