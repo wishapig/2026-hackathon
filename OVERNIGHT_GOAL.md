@@ -160,3 +160,5 @@
 - P010部署与组合资源收口：污染父环境DAG_THREADS=16、总/图1MiB、MAX*=1、audit/owner/serial等均被现submit清理，默认自动资源输出两校验器20/20；14MiB/2workers四case全部并行且独立4I→2I正确，小96细图触发缓存回收而非伪资源降级。证据results/pareto/P010/deployment及resource-check.json。rootbuild最终对应和清理尚待最终冻结。
 
 - 紧凑Task/string_view方案停止：保留现有Task独立所有权需跨API重构，不能将全批6.3ms复制成本当作仅字符串可省收益。最后限时小候选只复用grid第一遍几何检查已算出的商余/坐标，约15行、无新增缓存；避免第二遍ID数组约1.5MiB成本。候选后准备提前充分收口，不为等06:00空转。
+
+- 最后grid除法复用四对筛选P010393.325ms、候选399.352ms，无稳定完整/准备收益，拒绝合入；证据results/overnight/grid-screen。已充分完成多机制探索，按本文允许提前收口，2026-10-30约23:50冻结P010 b80e04d5e68ba5b8427955d55d4fd5b1ec1589e0；停止所有新方向，进入root干净构建、最终验收和清理。
