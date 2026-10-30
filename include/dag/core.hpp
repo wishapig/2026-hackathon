@@ -109,6 +109,10 @@ class Executor {
     Executor &operator=(const Executor &) = delete;
     ExecutionStats run(const Graph &, const std::function<void(const Task &)> &,
                        const std::function<void()> &before = {});
+    // Execute a pattern window whose tasks were proven independent. A return
+    // is the pause point: all writes are visible before the next window starts.
+    ExecutionStats run_independent(const std::vector<Task> &,
+                                   const std::function<void(const Task &)> &);
     void set_memory_budget(std::size_t bytes);
     std::size_t reserved_bytes() const;
     void zero_ranges(double *first, std::size_t first_count,

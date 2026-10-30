@@ -167,6 +167,9 @@ struct Executor::Impl {
         std::size_t count = 0;
     } zero_range[2];
     bool zero_job = false;
+    bool independent_job = false;
+    const std::vector<Task> *independent_tasks = nullptr;
+    alignas(64) std::atomic<std::size_t> independent_cursor{0};
 
     explicit Impl(RuntimeOptions o) : options(std::move(o)), cpus(allowed_node_cpus()) {
         if (options.backend != "atomic" && options.backend != "owner")
@@ -442,6 +445,15 @@ struct Executor::Impl {
             });
         }
     }
+    void work_independent() {
+        const auto &tasks = *independent_tasks;
+        while (!failed.load(std::memory_order_relaxed)) {
+            const auto id = independent_cursor.fetch_add(1, std::memory_order_relaxed);
+            if (id >= tasks.size())
+                return;
+            (*invoke)(tasks[id]);
+        }
+    }
     void worker(unsigned id) noexcept {
         try {
             if (options.pin)
@@ -472,6 +484,8 @@ struct Executor::Impl {
                         if (count)
                             std::fill_n(range.data + begin, count, 0.0);
                     }
+                } else if (independent_job) {
+                    work_independent();
                 } else {
                     work(id);
                 }
@@ -510,6 +524,42 @@ struct Executor::Impl {
         zero_range[0] = zero_range[1] = {};
         if (error)
             std::rethrow_exception(error);
+    }
+    ExecutionStats run_independent(const std::vector<Task> &tasks,
+                                   const std::function<void(const Task &)> &call) {
+        std::lock_guard<std::mutex> serialized(run_mutex);
+        const auto begin = std::chrono::steady_clock::now();
+        ExecutionStats stats;
+        stats.tasks = tasks.size();
+        stats.workers = workers;
+        // A singleton window has no parallel work and needs no pool wake.
+        if (tasks.size() <= 1) {
+            if (!tasks.empty())
+                call(tasks.front());
+        } else {
+            release_execution_storage();
+            independent_tasks = &tasks;
+            invoke = &call;
+            independent_cursor.store(0, std::memory_order_relaxed);
+            failed.store(false, std::memory_order_relaxed);
+            error = nullptr;
+            {
+                std::unique_lock<std::mutex> lock(control);
+                independent_job = true;
+                active = workers;
+                ++epoch;
+                start_cv.notify_all();
+                done_cv.wait(lock, [&] { return active == 0; });
+                independent_job = false;
+            }
+            independent_tasks = nullptr;
+            invoke = nullptr;
+            if (error)
+                std::rethrow_exception(error);
+        }
+        stats.execute_seconds =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
+        return stats;
     }
     std::size_t base_reservation() const {
         return checked_mul(workers, worker_stack_bytes + 2 * sizeof(Queue) + 4096);
@@ -662,6 +712,10 @@ Executor::~Executor() = default;
 ExecutionStats Executor::run(const Graph &g, const std::function<void(const Task &)> &fn,
                              const std::function<void()> &before) {
     return impl_->run(g, fn, before);
+}
+ExecutionStats Executor::run_independent(const std::vector<Task> &tasks,
+                                        const std::function<void(const Task &)> &call) {
+    return impl_->run_independent(tasks, call);
 }
 void Executor::set_memory_budget(std::size_t bytes) {
     impl_->set_budget(bytes);
