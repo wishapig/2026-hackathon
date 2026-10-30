@@ -1568,6 +1568,133 @@ struct PatternEnumerator {
         }
         return true;
     }
+    // independent_nest already establishes ordering for the complete domain.
+    // Compile its repeated row pattern once: subsequent rows only translate
+    // the same argument/access template instead of repeating pack_loop's
+    // expression walks, geometry proof, and temporary task allocations.
+    bool emit_affine_nest(BoundNode &outer, Int first, Int step,
+                          std::size_t trips) {
+        auto &inner = outer.body[0];
+        auto &call = inner.body[0];
+        values[outer.slot] = first;
+        const auto inner_first = e.checked(e.eval(inner.start, values));
+        const auto inner_stop = e.eval(inner.stop, values);
+        const auto inner_step = e.eval(inner.step, values);
+        Int start_delta = 0, stop_delta = 0;
+        if (!e.affine_delta(inner.start, outer.slot, step, values, start_delta) ||
+            !e.affine_delta(inner.stop, outer.slot, step, values, stop_delta)) return false;
+        values[inner.slot] = inner_first;
+        const std::array<std::size_t, 2> slots{outer.slot, inner.slot};
+        const Delta increments{step, inner_step};
+        Task base = call.scratch;
+        base.steps.resize(base.args.size() + base.reads.size() + base.writes.size());
+        std::vector<Int> shifts(base.steps.size());
+        const auto field = [&](const BoundExpr &expr, std::size_t at) {
+            Delta delta{};
+            if (!affine_pair(expr, slots, increments, delta)) return false;
+            const auto shift = static_cast<__int128>(delta[0]) +
+                               static_cast<__int128>(delta[1]) * (start_delta / inner_step);
+            if (shift < std::numeric_limits<Int>::min() ||
+                shift > std::numeric_limits<Int>::max()) return false;
+            base.steps[at] = delta[1];
+            shifts[at] = static_cast<Int>(shift);
+            return true;
+        };
+        for (std::size_t a = 0; a < call.args.size(); ++a) {
+            if (!field(call.args[a], a)) return false;
+            base.args[a] = e.eval(call.args[a], values);
+        }
+        std::size_t at = base.args.size();
+        for (unsigned writing = 0; writing < 2; ++writing) {
+            const auto &source = writing ? call.writes : call.reads;
+            auto &regions = writing ? base.writes : base.reads;
+            for (std::size_t r = 0; r < source.size(); ++r, ++at) {
+                if (!field(source[r].offset, at)) return false;
+                e.region(source[r], values, regions[r]);
+                const auto delta = base.steps[at];
+                if (delta < 0 || (delta && static_cast<__int128>(delta) !=
+                        static_cast<__int128>(regions[r].rows) * regions[r].stride)) return false;
+            }
+        }
+
+        const auto outer_final = e.checked(static_cast<__int128>(first) +
+                                          static_cast<__int128>(trips - 1) * step);
+        const auto final_stop = e.checked(static_cast<__int128>(inner_stop) +
+                                         static_cast<__int128>(trips - 1) * stop_delta);
+        const auto inner_span = (static_cast<__int128>(std::max(inner_stop, final_stop)) -
+                                 inner_first + inner_step - 1) / inner_step;
+        const auto inner_final = e.checked(static_cast<__int128>(inner_first) +
+                                          (inner_span - 1) * inner_step);
+        at = base.args.size();
+        for (const auto *regions : {&base.reads, &base.writes})
+            for (const auto &r : *regions)
+                if (base.steps[at++] && static_cast<__int128>(r.rows) * inner_span >
+                                           std::numeric_limits<std::size_t>::max()) return false;
+        // Affine expressions (including their intermediate operations) reach
+        // their extrema at corners. Use the existing evaluation checks once
+        // for the rectangular superset; unusual domains retain the old path.
+        try {
+            for (const auto i : {first, outer_final}) {
+                values[outer.slot] = i;
+                for (const auto j : {inner_first, inner_final}) {
+                    values[inner.slot] = j;
+                    for (const auto &arg : call.args) (void)e.eval(arg, values);
+                    Region endpoint;
+                    for (const auto *regions : {&call.reads, &call.writes})
+                        for (const auto &r : *regions) e.region(r, values, endpoint);
+                }
+            }
+        } catch (const std::runtime_error &) {
+            return false;
+        }
+
+        const auto desired = std::max<std::size_t>(e.limits.loop_parts, 1);
+        const auto desired_parts = desired / trips + (desired % trips != 0);
+        Task packed = base;
+        parallel = true;
+        for (std::size_t row = 0; row < trips; ++row) {
+            e.tick();
+            const auto begin = e.checked(static_cast<__int128>(inner_first) +
+                                         static_cast<__int128>(row) * start_delta);
+            const auto end = e.checked(static_cast<__int128>(inner_stop) +
+                                       static_cast<__int128>(row) * stop_delta);
+            const auto count = static_cast<std::size_t>(
+                (static_cast<__int128>(end) - begin + inner_step - 1) / inner_step);
+            const auto parts = std::min(desired_parts, count);
+            const auto width = count / parts, extra = count % parts;
+            std::size_t offset = 0;
+            for (std::size_t part = 0; part < parts; ++part) {
+                packed.repeat = width + (part < extra);
+                for (std::size_t a = 0; a < base.args.size(); ++a)
+                    packed.args[a] = static_cast<Int>(static_cast<__int128>(base.args[a]) +
+                        static_cast<__int128>(row) * shifts[a] +
+                        static_cast<__int128>(offset) * base.steps[a]);
+                at = base.args.size();
+                for (unsigned writing = 0; writing < 2; ++writing) {
+                    const auto &source = writing ? base.writes : base.reads;
+                    auto &regions = writing ? packed.writes : packed.reads;
+                    for (std::size_t r = 0; r < source.size(); ++r, ++at) {
+                        regions[r].offset = static_cast<std::size_t>(
+                            static_cast<__int128>(source[r].offset) +
+                            static_cast<__int128>(row) * shifts[at] +
+                            static_cast<__int128>(offset) * base.steps[at]);
+                        regions[r].rows = source[r].rows * (base.steps[at] ? packed.repeat : 1);
+                    }
+                }
+                if (packed.repeat > 1) packed.steps = base.steps;
+                else packed.steps.clear();
+                e.publish(packed);
+                offset += packed.repeat;
+            }
+            values[inner.slot] = e.checked(static_cast<__int128>(begin) +
+                                          static_cast<__int128>(count) * inner_step);
+        }
+        values[outer.slot] = outer_final;
+        (void)e.checked(static_cast<__int128>(first) + static_cast<__int128>(trips) * step);
+        flush();
+        parallel = false;
+        return true;
+    }
     void run(std::vector<BoundNode> &nodes) {
         for (auto &node : nodes) {
             if (node.source->kind != Node::Kind::For && node.source->kind != Node::Kind::If) {
@@ -1598,6 +1725,7 @@ struct PatternEnumerator {
             }
             parallel = false;
             if (independent_nest(node, first, step, trips)) {
+                if (emit_affine_nest(node, first, step, trips)) continue;
                 auto &inner = node.body[0];
                 const auto desired = std::max<std::size_t>(e.limits.loop_parts, 1);
                 const auto parts = desired / trips + (desired % trips != 0);
