@@ -828,9 +828,81 @@ def verify_algorithms(argv):
     return int(not report['passed'])
 
 
+
+def estimate_schedule(argv):
+    """Explicit DAG-kernel calibration and scheduling model; never a score."""
+    p = argparse.ArgumentParser(description=estimate_schedule.__doc__)
+    p.add_argument('--metadata', type=Path, required=True)
+    p.add_argument('--n', type=int, required=True)
+    p.add_argument('--b', type=int, required=True)
+    p.add_argument('--workers', type=int, nargs='+', default=[1, 2, 4, 8])
+    p.add_argument('--samples', type=int, default=5)
+    p.add_argument('--warmups', type=int, default=0)
+    p.add_argument('--graph-memory-mb', type=int, default=1024)
+    p.add_argument('--max-tasks', type=int, default=0)
+    p.add_argument('--max-steps', type=int, default=0)
+    p.add_argument('--backend', choices=['atomic', 'owner'], default='atomic')
+    p.add_argument('--policy', choices=['current', 'fifo'], nargs='+', default=['current', 'fifo'])
+    p.add_argument('--task-overhead-ns', type=int, default=0)
+    p.add_argument('--report', type=Path, required=True)
+    p.add_argument('--dag-estimate', type=Path, help=argparse.SUPPRESS)
+    a = p.parse_args(argv)
+    if a.n < 3 or a.b < 1 or a.n % a.b or a.samples < 1 or a.warmups < 0:
+        p.error('require n>=3, b>0, n%b==0, samples>=1 and warmups>=0')
+    if any(w < 1 for w in a.workers) or any(x < 0 for x in (a.graph_memory_mb, a.max_tasks, a.max_steps, a.task_overhead_ns)):
+        p.error('workers and resource limits must be positive/nonnegative')
+    exe = a.dag_estimate or (a.metadata.resolve().parent / 'dag_estimate')
+    if not exe.exists():
+        p.error('dag_estimate executable not found; build target dag_estimate first')
+    base = [str(exe), '--metadata', str(a.metadata.resolve()), '--n', str(a.n), '--b', str(a.b),
+            '--workers', ','.join(map(str, a.workers)), '--samples', str(a.samples), '--warmups', str(a.warmups),
+            '--graph-memory-mb', str(a.graph_memory_mb), '--max-tasks', str(a.max_tasks), '--max-steps', str(a.max_steps),
+            '--policy', a.policy[0], '--task-overhead-ns', str(a.task_overhead_ns)]
+    run = subprocess.run(base, capture_output=True, text=True)
+    report = {'command': 'estimate-schedule', 'configuration': {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(a).items()} ,
+              'host': {'platform': platform.platform(), 'logical_cpus': os.cpu_count()},
+              'metadata': {'path': str(a.metadata.resolve()), 'bytes': a.metadata.stat().st_size, 'sha256': digest(a.metadata)},
+              'kernel_library': 'linked by dag_estimate (current CMake kernel target)',
+              'backend': a.backend, 'assumptions': ['MODEL ONLY', 'NOT AN END-TO-END PERFORMANCE RESULT', 'NOT A CORRECTNESS RESULT',
+                 'cold/uncached approximation with warmups=0 by default; each sample reinitializes buffers outside timing',
+                 'single-threaded kernel calibration; no cache contention, bandwidth, NUMA, synchronization, wakeup or frequency effects',
+                 'copy, zero_upper, metadata decode, expansion, graph build, allocation and executor startup are excluded from modeled kernel work'],
+              'performance_eligible': False, 'correctness_validated': False}
+    if run.returncode:
+        report['status'] = 'resource_limited' if run.returncode == 3 else 'error'
+        report['error'] = run.stderr.strip() or 'dag_estimate failed'
+    else:
+        try:
+            report.update(json.loads(run.stdout))
+            report['results_by_policy'] = {a.policy[0]: report.get('results', [])}
+            for pol in a.policy[1:]:
+                rr = subprocess.run(base[:base.index('--policy')]+['--policy', pol]+base[base.index('--policy')+2:], capture_output=True, text=True)
+                if rr.returncode:
+                    report.setdefault('policy_errors', {})[pol] = rr.stderr.strip()
+                else:
+                    report['results_by_policy'][pol] = json.loads(rr.stdout).get('results', [])
+            report['status'] = 'ok'
+            svg = a.report.with_suffix('.svg')
+            vals = [('baseline', report.get('baseline_timing', {}).get('median', 0.0))]
+            vals += [(str(x.get('policy')) + '-' + str(x.get('workers')), x.get('estimated_dag_seconds', 0.0))
+                     for x in report.get('results', [])]
+            scale = max([v for _, v in vals] or [1.0]) or 1.0
+            bars = ''.join('<text x="10" y="%d">%s</text><rect x="120" y="%d" width="%.1f" height="16" fill="#4472c4"/><text x="%d" y="%d">%.6g s</text>'
+                           % (25+i*25, name, 10+i*25, 300*v/scale, 130+300*v/scale, 23+i*25, v)
+                           for i, (name, v) in enumerate(vals))
+            svg.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="520" height="%d"><text x="10" y="15">DAG model vs demo baseline (diagnostic)</text>%s</svg>\n'
+                           % (35+25*len(vals), bars))
+            report['comparison_plot'] = str(svg.resolve())
+        except (ValueError, OSError) as ex:
+            report['status'] = 'error'; report['error'] = str(ex)
+    a.report.parent.mkdir(parents=True, exist_ok=True); a.report.write_text(json.dumps(report, indent=2) + '\n')
+    print('MODEL ONLY\nNOT AN END-TO-END PERFORMANCE RESULT\nNOT A CORRECTNESS RESULT')
+    print(json.dumps({'status': report['status'], 'task_count': report.get('task_count'), 'edge_count': report.get('edge_count'), 'report': str(a.report)}))
+    return 0 if report['status'] == 'ok' else 1
+
 def main():
     commands = {'accept-public20': accept_public20, 'compare-reports': compare_reports, 'submit': submit,
-                'verify-algorithms': verify_algorithms}
+                'verify-algorithms': verify_algorithms, 'estimate-schedule': estimate_schedule}
     if len(sys.argv) > 1 and sys.argv[1] in commands:
         return commands[sys.argv[1]](sys.argv[2:])
     p = argparse.ArgumentParser(description=__doc__)
