@@ -49,6 +49,9 @@
   "resource_check": "../../pareto/P010/resource-check.json",
   "clean_deployment_check": "../../pareto/P010/deployment/result.json",
   "limitations": "Host drift visible. Local x86-64/demo only; official archive and Kunpeng not available. No official score inferred.",
-  "temporary_cleanup": "pending",
-  "local_handoff_status": "pending cleanup and documentation"
+  "temporary_cleanup": "complete; exact list in cleanup.json; historical branches/tags/commits and final reports preserved",
+  "local_handoff_status": "complete",
+  "completed_beijing": "2026-10-30T23:54:01+08:00",
+  "production_source_matches_tag": true,
+  "external_validation": "not completed: official library and Kunpeng unavailable"
 }

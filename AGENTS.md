@@ -25,3 +25,10 @@
 
 - 最新执行目标为根目录 OVERNIGHT_GOAL.md，交付截止为北京时间2026-10-31 06:00：04:30停止新方向、05:00冻结实现，之后只做验收和交接。此前goal保留历史，不覆盖这个时间要求。
 - 保留睡前完整基线round2/baseline（96908872cab3e24e22096fbeac95c64a0f78862d），默认141字节Metadata及R-27/R-28功能不回退；分析/实现fanout继续有效。夜间不重新跑无新证据的已失败微调，不把临时剖析计入正式收益。
+
+### 夜间目标已完成（提前交付）
+
+- OVERNIGHT_GOAL.md的本地优化与验收已完成，最终推荐pareto/P010：b80e04d5e68ba5b8427955d55d4fd5b1ec1589e0。默认Metadata139字节，变化仅为离线选择更小的既有raw-deflate流，语义payload不变；不恢复SHA/FNV/审计名称。
+- 保留矩阵容量按预算回收、循环字段惰性复用、已有线程池计时内初始化；拒绝PMR arena、输出软归属、alignment及最后除法复用实验的默认集成。根目录build与P010已验证产物一致。
+- 最终同场5轮中位345.208ms vs旧基线367.213ms（约6%，本地x86-64/demo且有主机漂移），20/20和3算法功能均通过，零资源排除；污染环境submit和14MiB组合回收验证通过。证据results/overnight/final，操作见SUBMISSION.md。
+- round2/baseline睡前回退和P001～P010标签均保留；本轮临时worktree/构建已清理。正式库及Kunpeng目标验证仍未完成，不能把本地通过说成正式成绩。

@@ -1,12 +1,18 @@
 # 比赛提交交接
 
-## 夜间当前已验收版本（最终冻结前）
+## 夜间最终推荐（已提前收口）
 
-**当前可回退的新候选：P010，b80e04d5e68ba5b8427955d55d4fd5b1ec1589e0，标签pareto/P010。** 默认Metadata139字节。完整公开验收（原verifier20/20、加强校验20/20）和R-27三算法功能已通过；本轮最终冻结尚未完成，后续实验不自动成为推荐。
+**最终推荐：P010，b80e04d5e68ba5b8427955d55d4fd5b1ec1589e0，标签pareto/P010。** 默认Metadata139字节。完整公开验收（原verifier20/20、加强校验20/20）和R-27三算法功能已通过；本轮已提前冻结并完成本地交付；根目录build已干净重建，与被验收P010二进制逐字一致。
 
 P010包含按实际预算回收的矩阵容量复用、循环作用域字段惰性复用、离线deflate策略选择、已有线程池的计时内矩阵初始化。没有改公共算子、n/b、逻辑布局或计时排除范围，也没有新增计分审计/名称/哈希。
 
-同场1warmup+5次独立进程，中位P010为0.327759371秒，旧基线0.349058080秒，去掉并行初始化的组合0.342698438秒。主机存在明显耗时漂移；保留全体样本，不与较早约0.28秒批次拼接收益，不作为Kunpeng或正式库承诺。全部20case有效、没有资源排除。证据：[P010](results/pareto/P010/manifest.json)、[交错原始记录](results/overnight/bulk-confirmation/manifest.json)。
+最终干净构建同场1warmup+5次独立进程，中位P010为0.345207979秒，旧基线0.367212951秒，本地完整耗时约减少5.99%，5对中4对更快。全部20case有效、没有资源排除。主机耗时仍有漂移；只比较本组对照，不与较早约0.28秒批次拼接，不作为Kunpeng或正式库承诺。[最终验收及全部原始样本](results/overnight/final/manifest.json)。
+
+当前工作区可直接使用：
+
+    python3 tools/benchmark.py submit build/dag_run input.bin output.bin --metadata build/block_cholesky.meta --configuration-report submission-config.json
+
+输入路径换成实际评测文件。根目录build是本地demo构建；正式评委库必须按下列独立构建步骤重新链接。污染环境启动及14MiB/2线程缓存回收验证均通过；见[P010部署](results/pareto/P010/deployment/result.json)与[资源交互](results/pareto/P010/resource-check.json)。实验worktree和临时构建已清理，原commit、标签和结果均保留。
 
     git worktree add --detach ../contest-p010-submit pareto/P010
     cd ../contest-p010-submit
