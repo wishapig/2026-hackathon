@@ -147,6 +147,7 @@ struct Executor::Impl {
     std::vector<ThreadArg> arguments;
     std::unique_ptr<Queue[]> ready, inbox;
     std::vector<std::size_t> next, prev, event_next;
+    std::vector<std::uint32_t> preferred_owner;
     std::unique_ptr<std::atomic<std::uint32_t>[]> remaining;
     std::unique_ptr<std::atomic<unsigned char>[]> seen;
     std::size_t remaining_count = 0, seen_count = 0;
@@ -285,9 +286,40 @@ struct Executor::Impl {
             throw std::runtime_error("duplicate dependency notification or counter underflow");
         return old == 1;
     }
+    unsigned placement(unsigned publisher, std::size_t target) const {
+        if (preferred_owner.empty() || preferred_owner[target] == workers)
+            return publisher;
+        return preferred_owner[target];
+    }
+    unsigned output_owner(const Task &task) const {
+        const Region *largest = nullptr;
+        std::size_t area = 0;
+        // Region extents have already been checked by the graph builder.
+        // Equal areas retain source order; ownership is only a placement hint.
+        for (const auto &region : task.writes) {
+            const auto size = region.rows * region.cols;
+            if (size > area) {
+                largest = &region;
+                area = size;
+            }
+        }
+        if (!largest)
+            return workers;
+        auto mix = [](std::uint64_t value) {
+            value ^= value >> 30;
+            value *= UINT64_C(0xbf58476d1ce4e5b9);
+            value ^= value >> 27;
+            value *= UINT64_C(0x94d049bb133111eb);
+            return value ^ (value >> 31);
+        };
+        std::uint64_t key = std::hash<std::string>{}(largest->buffer);
+        for (auto component : {largest->offset, largest->rows, largest->cols, largest->stride})
+            key = mix(key + component + UINT64_C(0x9e3779b97f4a7c15));
+        return static_cast<unsigned>(key % workers);
+    }
     void decrement(unsigned publisher, std::uint32_t target) {
         if (ready_after_decrement(target))
-            push(publisher, target);
+            push(placement(publisher, target), target);
     }
     void send(unsigned owner, std::size_t edge) {
         auto &q = inbox[owner];
@@ -394,11 +426,16 @@ struct Executor::Impl {
                     const auto target = graph->successors[e];
                     if (options.backend == "atomic") {
                         if (ready_after_decrement(target)) {
-                            // Match local LIFO ordering: retain the newest
-                            // successor, publish earlier ones for other workers.
-                            if (continuation != none)
-                                push(worker, continuation);
-                            continuation = target;
+                            const auto owner = placement(worker, target);
+                            if (owner == worker) {
+                                // Retain the newest local successor and publish
+                                // earlier ones, matching local LIFO ordering.
+                                if (continuation != none)
+                                    push(worker, continuation);
+                                continuation = target;
+                            } else {
+                                push(owner, target);
+                            }
                         }
                     } else {
                         const auto owner = target % workers;
@@ -479,6 +516,7 @@ struct Executor::Impl {
         bytes =
             checked_add(bytes, checked_mul(remaining_count, sizeof(std::atomic<std::uint32_t>)));
         bytes = checked_add(bytes, checked_mul(seen_count, sizeof(std::atomic<unsigned char>)));
+        bytes = checked_add(bytes, checked_mul(preferred_owner.capacity(), sizeof(std::uint32_t)));
         return bytes;
     }
     std::size_t reservation() const {
@@ -489,6 +527,7 @@ struct Executor::Impl {
         std::vector<std::size_t>().swap(next);
         std::vector<std::size_t>().swap(prev);
         std::vector<std::size_t>().swap(event_next);
+        std::vector<std::uint32_t>().swap(preferred_owner);
         remaining.reset();
         seen.reset();
         remaining_count = seen_count = 0;
@@ -522,6 +561,7 @@ struct Executor::Impl {
             g.memory_bytes, checked_mul(workers, worker_stack_bytes + 2 * sizeof(Queue) + 4096));
         estimate = checked_add(
             estimate, checked_mul(n, 2 * sizeof(std::size_t) + sizeof(std::uint32_t) +
+                                         (options.output_locality ? sizeof(std::uint32_t) : 0) +
                                          (options.audit ? sizeof(std::uint32_t) : 0) +
                                          (options.audit ? sizeof(std::atomic<unsigned char>) : 0)));
         if (options.backend == "owner")
@@ -562,6 +602,11 @@ struct Executor::Impl {
         }
         if (options.backend == "owner")
             event_next.assign(g.successors.size(), none);
+        if (options.output_locality) {
+            preferred_owner.resize(n);
+            for (std::size_t i = 0; i < n; ++i)
+                preferred_owner[i] = output_owner(g.tasks[i]);
+        }
         for (std::size_t i = 0; i < n; ++i) {
             remaining[i].store(g.indegrees[i], std::memory_order_relaxed);
             if (options.audit)
@@ -583,7 +628,7 @@ struct Executor::Impl {
         error = nullptr;
         for (std::size_t i = 0; i < n; ++i)
             if (!g.indegrees[i])
-                push(static_cast<unsigned>(i % workers), i);
+                push(placement(static_cast<unsigned>(i % workers), i), i);
         {
             std::unique_lock<std::mutex> lock(control);
             active = workers;
