@@ -1,0 +1,27 @@
+{
+  "candidate_commit": "376ba28b0da38cd006499d5b85e98ca512fb6da6",
+  "implementation_commit": "1343226c96315712d78cfcf4a8804e5885059214",
+  "metadata_bytes": 141,
+  "comparison": "same executable, locality off/on, four alternating pairs, one fresh measured process each; preliminary screen only",
+  "seconds": {
+    "0": [
+      0.278045003,
+      0.272877035,
+      0.28613061,
+      0.27563543400000007
+    ],
+    "1": [
+      0.264497771,
+      0.278026563,
+      0.284529111,
+      0.282269894
+    ]
+  },
+  "median_seconds": {
+    "0": 0.27684021850000007,
+    "1": 0.2801482285
+  },
+  "decision": "Reject production integration: no stable total-time benefit; no full candidate acceptance or Pareto designation. Preserve branch and evidence.",
+  "coverage": "20/20 independently checked in all samples; no resource exclusions",
+  "scope": "local x86-64 demo library, not judge hardware or official library"
+}
