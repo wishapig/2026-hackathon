@@ -126,6 +126,8 @@ def environment_identity(env):
                   'rlimit_data': list(resource.getrlimit(resource.RLIMIT_DATA)),
                   'budgets': {k: env.get(k) for k in (
                       'DAG_MEMORY_MB', 'DAG_GRAPH_MEMORY_MB', 'DAG_MAX_TASKS', 'DAG_MAX_STEPS')}}
+    for key in ('DAG_GRAPH_MEMORY_MB', 'DAG_MAX_TASKS', 'DAG_MAX_STEPS'):
+        allocation['budgets'][key] = str(int(env.get(key, '0')))
     for name in ('/proc/self/cgroup', '/sys/fs/cgroup/memory.max',
                  '/sys/fs/cgroup/cpuset.cpus.effective', '/sys/fs/cgroup/cpuset.mems.effective'):
         try:
@@ -546,6 +548,26 @@ def main():
               'summary': {'metadata_bytes': a.metadata.stat().st_size},
               'samples': []}
     report['input_cases'] = input_cases(a.input, a.io_format)
+    if a.io_format == 'original':
+        if a.application == 'scalar':
+            blocks = [1] * len(report['input_cases'])
+        else:
+            shared = env_base.get('DAG_BLOCK_SIZE', '')
+            per_case = env_base.get('DAG_BLOCK_SIZES', '')
+            if bool(shared) == bool(per_case):
+                p.error('original blocked input requires exactly one block-size setting')
+            try:
+                blocks = ([int(shared)] * len(report['input_cases']) if shared else
+                          [int(value) for value in per_case.split(',')])
+            except ValueError:
+                p.error('invalid original-format block size')
+            if len(blocks) != len(report['input_cases']):
+                p.error('original-format block-size count mismatch')
+        for case, block in zip(report['input_cases'], blocks):
+            if block <= 0 or block > case['n'] or case['n'] % block:
+                p.error('invalid original-format block size')
+            case['b'] = block
+
     report['kernel_library'] = kernel_identity(a.program, a.kernel_library)
     report['environment_identity'] = environment_identity(env_base)
     report['environment_fingerprint'] = fingerprint(report['environment_identity'])
