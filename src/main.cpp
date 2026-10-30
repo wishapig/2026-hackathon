@@ -805,11 +805,13 @@ int main(int argc, char **argv) {
                         resource_stage = "task-expansion";
                         // Pattern windows are worthwhile once the parameterized
                         // loop has enough outer iterations to amortize its
-                        // pause points. Tiny shapes retain the existing graph
-                        // path, including its serial-small-workload choice.
+                        // pause points. For small q the compact CSR graph is
+                        // cheaper; an explicit pattern request still forces
+                        // the window path for diagnosis and large-case tuning.
                         const auto q = static_cast<std::size_t>(n / b);
                         if (!scalar_application && mode != "serial" &&
-                            schedule != "graph" && !limits.max_steps && q > 2) {
+                            schedule != "graph" && !limits.max_steps &&
+                            (schedule == "pattern" || q >= 64)) {
                             resource_stage = "pattern-workspace";
                             const auto scratch = static_cast<std::size_t>(b) * b * sizeof(double);
                             if (scratch > case_budget / planned_workers)
